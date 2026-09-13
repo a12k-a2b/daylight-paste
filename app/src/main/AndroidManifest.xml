@@ -47,6 +47,14 @@
         </service>
 
         <receiver
+            android:name=".service.ClipImportReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.daylightcomputer.paste.ACTION_INSERT_CLIP" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
             android:name=".service.BootReceiver"
             android:exported="true">
             <intent-filter>
