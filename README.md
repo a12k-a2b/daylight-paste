@@ -46,6 +46,19 @@ Optimized for the custom 10.5" 1200×1600 @ 200 DPI **LivePaper transflective re
 
 ---
 
+## Visual Tour & App States
+
+| State | Preview | Description |
+|---|---|---|
+| **1. Main Pinboard Cards** | <img src="screenshots/01_main_pinboard_cards.png" width="360" alt="Main Pinboard Cards"> | **Tactile Stationery Interface**: LivePaper cards with character & word counts, source application, category badges (`MARKDOWN`, `AI & WRITING`, `CODE`), and dual copy actions (`COPY MARKDOWN` / `PLAIN`). |
+| **2. Long-Form Reader Modal** | <img src="screenshots/02_reader_modal_garamond.png" width="360" alt="Reader Modal"> | **Distraction-Free Reading**: Full-screen reader rendered in literary `EB Garamond` typography. Designed specifically for comfortable reading of massive AI outputs on the LivePaper transflective display. |
+| **3. Instant Search Filtering** | <img src="screenshots/03_instant_search_filtering.png" width="360" alt="Search Filtering"> | **Sub-Millisecond Search**: Real-time full-text search filtering across history (e.g. searching "gradient" isolates matching code and journal entries instantly). Includes quick-clear action. |
+| **4. Smart Pinboard Categories** | <img src="screenshots/04_code_tab_iosevka.png" width="360" alt="Code Pinboard"> | **Category Organization**: Filtering by content type. The `💻 CODE` filter displays snippets formatted in `Iosevka` monospace with indentation preservation. |
+| **5. Tactile Amber Confirmation** | <img src="screenshots/05_amber_toast_confirmation.png" width="360" alt="Amber Confirmation"> | **Visual Feedback**: Ambient 595nm amber confirmation pill (`✓ Copied Clean Markdown to Clipboard`) verifying safe injection of Markdown into the Android clipboard. |
+| **6. Empty Clipboard State** | <img src="screenshots/06_empty_state.png" width="360" alt="Empty State"> | **Clean Minimal Baseline**: Zero-clutter empty state shown on first run or when history is cleared, providing clear cues on how to capture text. |
+
+---
+
 ## Architecture & Hardware Compatibility
 
 - **Display Panel**: Custom 10.5" 1200×1600 @ 200 DPI transflective reflective LCD. (Never referred to as Memory-in-Pixel/MIP).
