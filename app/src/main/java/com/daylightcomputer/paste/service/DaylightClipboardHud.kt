@@ -9,7 +9,6 @@ import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -28,7 +27,7 @@ import androidx.compose.ui.unit.sp
 import com.daylightcomputer.paste.data.DaylightClip
 import com.daylightcomputer.paste.ui.MainActivity
 import com.daylightcomputer.paste.ui.theme.DaylightColors
-import com.daylightcomputer.paste.ui.theme.DaylightTypography
+import com.daylightcomputer.paste.ui.theme.DaylightFontFamilies
 
 /**
  * SolOS LivePaper Floating Clipboard HUD.
@@ -97,11 +96,11 @@ class DaylightClipboardHud(private val context: Context) {
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Surface(
-                                            color = DaylightColors.AmberAccent,
+                                            color = DaylightColors.Amber595nm,
                                             shape = RoundedCornerShape(4.dp)
                                         ) {
                                             Text(
-                                                text = clip.contentType,
+                                                text = clip.clipType.name,
                                                 color = DaylightColors.PaperBg,
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
@@ -113,7 +112,7 @@ class DaylightClipboardHud(private val context: Context) {
 
                                         Text(
                                             text = "${clip.charCount} chars · ${clip.wordCount} words",
-                                            fontFamily = DaylightTypography.RomExtended,
+                                            fontFamily = DaylightFontFamilies.RomExtendedLight,
                                             fontSize = 10.sp,
                                             color = DaylightColors.InkSubtle
                                         )
@@ -137,7 +136,7 @@ class DaylightClipboardHud(private val context: Context) {
                                 // Title
                                 Text(
                                     text = clip.title,
-                                    fontFamily = DaylightTypography.ArizonaMix,
+                                    fontFamily = DaylightFontFamilies.ArizonaMix,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = DaylightColors.InkBlack,
@@ -150,7 +149,7 @@ class DaylightClipboardHud(private val context: Context) {
                                 // Snippet Preview
                                 Text(
                                     text = clip.markdownContent.trim(),
-                                    fontFamily = DaylightTypography.ArizonaSans,
+                                    fontFamily = DaylightFontFamilies.ArizonaSans,
                                     fontSize = 12.sp,
                                     color = DaylightColors.InkBlack,
                                     maxLines = 2,
@@ -166,15 +165,11 @@ class DaylightClipboardHud(private val context: Context) {
                                 ) {
                                     Button(
                                         onClick = {
-                                            DaylightPasteManager.copyCleanMarkdownToClipboard(
-                                                context,
-                                                clip.markdownContent,
-                                                clip.title
-                                            )
+                                            DaylightPasteManager.copyAsMarkdown(context, clip)
                                             dismiss()
                                         },
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = DaylightColors.AmberAccent,
+                                            containerColor = DaylightColors.Amber595nm,
                                             contentColor = DaylightColors.PaperBg
                                         ),
                                         shape = RoundedCornerShape(6.dp),
@@ -190,11 +185,7 @@ class DaylightClipboardHud(private val context: Context) {
 
                                     OutlinedButton(
                                         onClick = {
-                                            DaylightPasteManager.copyPlainTextToClipboard(
-                                                context,
-                                                clip.textContent,
-                                                clip.title
-                                            )
+                                            DaylightPasteManager.copyAsPlainText(context, clip)
                                             dismiss()
                                         },
                                         colors = ButtonDefaults.outlinedButtonColors(

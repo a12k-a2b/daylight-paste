@@ -26,8 +26,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.daylightcomputer.paste.data.ClipDatabase
 import com.daylightcomputer.paste.data.DaylightClip
+import com.daylightcomputer.paste.service.DaylightPasteManager
 import com.daylightcomputer.paste.ui.theme.DaylightColors
-import com.daylightcomputer.paste.ui.theme.DaylightTypography
+import com.daylightcomputer.paste.ui.theme.DaylightFontFamilies
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -49,8 +50,8 @@ class ProcessPasteActivity : ComponentActivity() {
 
             LaunchedEffect(Unit) {
                 val db = ClipDatabase.getInstance(applicationContext)
-                val loadedClips = withContext(Dispatchers.IO) {
-                    db.getAllClips()
+                val loadedClips: List<DaylightClip> = withContext(Dispatchers.IO) {
+                    db.getClips()
                 }
                 clips = loadedClips
                 isLoading = false
@@ -94,14 +95,14 @@ class ProcessPasteActivity : ComponentActivity() {
                                 Column {
                                     Text(
                                         text = "PASTE FROM DAYLIGHT",
-                                        fontFamily = DaylightTypography.ArizonaMix,
+                                        fontFamily = DaylightFontFamilies.ArizonaMix,
                                         fontSize = 18.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = DaylightColors.InkBlack
                                     )
                                     Text(
                                         text = if (isReadOnly) "Select clip to copy clean Markdown" else "Tap a clipping to paste into active field",
-                                        fontFamily = DaylightTypography.ArizonaSans,
+                                        fontFamily = DaylightFontFamilies.ArizonaSans,
                                         fontSize = 13.sp,
                                         color = DaylightColors.InkSubtle
                                     )
@@ -123,7 +124,7 @@ class ProcessPasteActivity : ComponentActivity() {
                                     modifier = Modifier.fillMaxSize(),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    CircularProgressIndicator(color = DaylightColors.AmberAccent)
+                                    CircularProgressIndicator(color = DaylightColors.Amber595nm)
                                 }
                             } else if (clips.isEmpty()) {
                                 Box(
@@ -132,7 +133,7 @@ class ProcessPasteActivity : ComponentActivity() {
                                 ) {
                                     Text(
                                         text = "No clippings stored yet",
-                                        fontFamily = DaylightTypography.ArizonaSans,
+                                        fontFamily = DaylightFontFamilies.ArizonaSans,
                                         color = DaylightColors.InkSubtle,
                                         fontSize = 15.sp
                                     )
@@ -163,7 +164,7 @@ class ProcessPasteActivity : ComponentActivity() {
                                                 ) {
                                                     Text(
                                                         text = clip.title,
-                                                        fontFamily = DaylightTypography.ArizonaMix,
+                                                        fontFamily = DaylightFontFamilies.ArizonaMix,
                                                         fontSize = 15.sp,
                                                         fontWeight = FontWeight.Bold,
                                                         color = DaylightColors.InkBlack,
@@ -173,12 +174,12 @@ class ProcessPasteActivity : ComponentActivity() {
                                                     )
                                                     
                                                     Surface(
-                                                        color = DaylightColors.AmberAccent,
+                                                        color = DaylightColors.Amber595nm,
                                                         shape = RoundedCornerShape(4.dp),
                                                         modifier = Modifier.padding(start = 8.dp)
                                                     ) {
                                                         Text(
-                                                            text = clip.contentType,
+                                                            text = clip.clipType.name,
                                                             color = DaylightColors.PaperBg,
                                                             fontSize = 10.sp,
                                                             fontWeight = FontWeight.Bold,
@@ -191,7 +192,7 @@ class ProcessPasteActivity : ComponentActivity() {
 
                                                 Text(
                                                     text = clip.markdownContent.trim(),
-                                                    fontFamily = DaylightTypography.ArizonaSans,
+                                                    fontFamily = DaylightFontFamilies.ArizonaSans,
                                                     fontSize = 13.sp,
                                                     color = DaylightColors.InkBlack,
                                                     maxLines = 2,
@@ -202,7 +203,7 @@ class ProcessPasteActivity : ComponentActivity() {
 
                                                 Text(
                                                     text = "${clip.charCount} chars · ${clip.wordCount} words · ${clip.sourcePackage}",
-                                                    fontFamily = DaylightTypography.RomExtended,
+                                                    fontFamily = DaylightFontFamilies.RomExtendedLight,
                                                     fontSize = 10.sp,
                                                     color = DaylightColors.InkSubtle
                                                 )
@@ -225,12 +226,8 @@ class ProcessPasteActivity : ComponentActivity() {
             }
             setResult(RESULT_OK, resultIntent)
         } else {
-            // In read-only contexts, place on clipboard
-            com.daylightcomputer.paste.service.DaylightPasteManager.copyCleanMarkdownToClipboard(
-                this,
-                clip.markdownContent,
-                clip.title
-            )
+            // In read-only contexts, place clean Markdown on clipboard
+            DaylightPasteManager.copyAsMarkdown(this, clip)
         }
         finish()
     }

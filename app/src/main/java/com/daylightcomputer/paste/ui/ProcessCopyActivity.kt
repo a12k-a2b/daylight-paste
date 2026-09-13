@@ -40,9 +40,9 @@ class ProcessCopyActivity : Activity() {
                 textContent = selectedText,
                 markdownContent = markdownContent,
                 title = title,
+                clipType = clipType,
                 charCount = charCount,
                 wordCount = wordCount,
-                contentType = clipType.name,
                 sourcePackage = callingPackage ?: "Tooltip Menu"
             )
 
@@ -50,7 +50,7 @@ class ProcessCopyActivity : Activity() {
                 database.insertClip(clip)
             }
 
-            DaylightPasteManager.copyCleanMarkdownToClipboard(this, markdownContent, title)
+            DaylightPasteManager.copyAsMarkdown(this, clip)
             Toast.makeText(this, "✓ Captured Clean Markdown to Daylight Paste", Toast.LENGTH_SHORT).show()
         }
 
