@@ -68,6 +68,15 @@ fun PasteScreen() {
     var activeReaderClip by remember { mutableStateOf<DaylightClip?>(null) }
     var confirmationMessage by remember { mutableStateOf<String?>(null) }
 
+    // Handle Android system back gesture / button
+    androidx.activity.compose.BackHandler(enabled = activeReaderClip != null) {
+        activeReaderClip = null
+    }
+
+    androidx.activity.compose.BackHandler(enabled = activeReaderClip == null && searchQuery.isNotEmpty()) {
+        searchQuery = ""
+    }
+
     // Refresh clips helper
     fun refreshClips() {
         scope.launch(Dispatchers.IO) {
