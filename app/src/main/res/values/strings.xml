@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Daylight Paste</string>
+    <string name="clipboard_service_name">Daylight Clipboard Service</string>
+</resources>
