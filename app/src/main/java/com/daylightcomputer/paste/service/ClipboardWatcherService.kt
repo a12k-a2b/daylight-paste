@@ -27,6 +27,7 @@ class ClipboardWatcherService : Service() {
     private val scope = CoroutineScope(Dispatchers.IO + job)
     private var clipboardManager: ClipboardManager? = null
     private lateinit var database: ClipDatabase
+    private var clipboardHud: DaylightClipboardHud? = null
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
         onClipboardChanged()
@@ -37,6 +38,7 @@ class ClipboardWatcherService : Service() {
         database = ClipDatabase.getInstance(this)
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
         clipboardManager?.addPrimaryClipChangedListener(clipListener)
+        clipboardHud = DaylightClipboardHud(this)
 
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, createNotification())
@@ -50,6 +52,7 @@ class ClipboardWatcherService : Service() {
 
     override fun onDestroy() {
         clipboardManager?.removePrimaryClipChangedListener(clipListener)
+        clipboardHud?.dismiss()
         job.cancel()
         super.onDestroy()
     }
@@ -108,6 +111,11 @@ class ClipboardWatcherService : Service() {
                 )
 
                 database.insertClip(daylightClip)
+
+                // Show SolOS LivePaper HUD if copied from an external app
+                if (sourcePackage != packageName) {
+                    clipboardHud?.show(daylightClip)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
