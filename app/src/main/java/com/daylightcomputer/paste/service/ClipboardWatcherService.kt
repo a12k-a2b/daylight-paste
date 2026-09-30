@@ -113,7 +113,10 @@ class ClipboardWatcherService : Service() {
                 database.insertClip(daylightClip)
 
                 // Show SolOS LivePaper HUD if copied from an external app
-                if (sourcePackage != packageName) {
+                val isInternal = (sourcePackage == packageName) ||
+                        DaylightPasteManager.isRecentInternalCopy(content) ||
+                        DaylightPasteManager.isRecentInternalCopy(markdownContent)
+                if (!isInternal) {
                     clipboardHud?.show(daylightClip)
                 }
             } catch (e: Exception) {

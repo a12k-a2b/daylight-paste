@@ -46,12 +46,20 @@ class ProcessCopyActivity : Activity() {
                 sourcePackage = callingPackage ?: "Tooltip Menu"
             )
 
+            // Persist immediately
             CoroutineScope(Dispatchers.IO).launch {
                 database.insertClip(clip)
             }
 
             DaylightPasteManager.copyAsMarkdown(this, clip)
-            Toast.makeText(this, "✓ Captured Clean Markdown to Daylight Paste", Toast.LENGTH_SHORT).show()
+
+            // Trigger non-intrusive SolOS amber pill HUD toast
+            try {
+                DaylightClipboardHud(applicationContext).show(clip)
+            } catch (e: Exception) {
+                // Fallback in case overlay permission not yet granted
+                Toast.makeText(this, "✓ Captured to Daylight Paste", Toast.LENGTH_SHORT).show()
+            }
         }
 
         finish()
