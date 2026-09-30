@@ -341,27 +341,28 @@ object MarkdownTranspiler {
      * - Fenced or inline code blocks (vaulted or delimited with backticks)
      */
     fun stripInlineCitations(text: String): String {
-        // Citations in prose are:
-        // 1. Bracketed non-zero digits e.g. [1], [2], [1, 2], [1-3] or [citation needed] or [note 1]
-        // 2. NOT immediately followed by ( (which would be a markdown link)
-        // 3. NOT an array access (i.e. not immediately preceded by an identifier character [a-zA-Z0-9_])
-        // 4. Citation numbers start at 1 (not 0, which is universally code index)
-        // 5. Handles optional leading space so "word [1]." cleans cleanly to "word."
-        val citationWithLeadingSpace = Pattern.compile("(?<![a-zA-Z0-9_\\[\\!])\\s*\\[([1-9]\\d*(?:[-,]\\s*[1-9]\\d*)*|citation needed|note\\s*\\d+)\\](?!\\()", Pattern.CASE_INSENSITIVE)
-        
-        // Clean citations that have backtick-delimited code on lines:
-        // We only strip citations outside backtick segments
+        if (text.isBlank()) return text
+        if (detectClipType(text) == ClipType.CODE) return text
+
+        val singleCitation = "\\[(?:[1-9]\\d*(?:[-,]\\s*[1-9]\\d*)*|citation needed|note\\s*\\d+)\\](?!\\()"
+        val punctPattern = Pattern.compile("\\s*(?:$singleCitation)+(?=[.,;:!?])", Pattern.CASE_INSENSITIVE)
+        val spacePattern = Pattern.compile("(?<=\\s)(?:$singleCitation)+\\s*", Pattern.CASE_INSENSITIVE)
+        val remainPattern = Pattern.compile("(?:$singleCitation)+", Pattern.CASE_INSENSITIVE)
+
         val lines = text.split("\n")
         val processedLines = lines.map { line ->
             if (!line.contains("`")) {
-                citationWithLeadingSpace.matcher(line).replaceAll("")
+                var s = punctPattern.matcher(line).replaceAll("")
+                s = spacePattern.matcher(s).replaceAll("")
+                remainPattern.matcher(s).replaceAll("")
             } else {
-                // Split line by backticks: even index = outside code, odd index = inside code
                 val parts = line.split("`")
                 val sb = StringBuilder()
                 for (i in parts.indices) {
                     if (i % 2 == 0) {
-                        sb.append(citationWithLeadingSpace.matcher(parts[i]).replaceAll(""))
+                        var s = punctPattern.matcher(parts[i]).replaceAll("")
+                        s = spacePattern.matcher(s).replaceAll("")
+                        sb.append(remainPattern.matcher(s).replaceAll(""))
                     } else {
                         sb.append("`").append(parts[i]).append("`")
                     }
@@ -450,6 +451,7 @@ object MarkdownTranspiler {
                 (trimmed.contains("function ") && trimmed.contains("{") && trimmed.contains("}")) ||
                 (trimmed.contains("class ") && trimmed.contains("{") && trimmed.contains("}")) ||
                 (trimmed.contains("public static void main")) ||
+                (trimmed.contains("val ") || trimmed.contains("var ") || trimmed.contains("let ") || trimmed.contains("const ")) ||
                 (trimmed.contains("import ") && (trimmed.contains("from ") || trimmed.contains(";")))
 
         if (isCode) {
