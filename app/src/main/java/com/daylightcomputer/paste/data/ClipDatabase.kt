@@ -207,6 +207,25 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
         return rows > 0
     }
 
+    fun getClipById(id: Long): DaylightClip? {
+        val db = readableDatabase
+        val cursor = db.query(
+            TABLE_CLIPS,
+            null,
+            "$COL_ID = ?",
+            arrayOf(id.toString()),
+            null,
+            null,
+            null
+        )
+        cursor.use {
+            if (it.moveToFirst()) {
+                return parseCursor(it)
+            }
+        }
+        return null
+    }
+
     fun clearHistory(keepPinned: Boolean = true): Int {
         val db = writableDatabase
         val where = if (keepPinned) "$COL_IS_PINNED = 0" else null
