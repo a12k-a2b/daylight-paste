@@ -100,17 +100,22 @@ fun PasteScreen() {
     }
 
     Scaffold(
-        containerColor = DaylightColors.PaperBg
-    ) { padding ->
+        containerColor = DaylightColors.PaperBg,
+        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets.safeDrawing
+    ) { innerPadding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 24.dp, vertical = 20.dp)
+                    .padding(
+                        start = 24.dp,
+                        end = 24.dp,
+                        top = innerPadding.calculateTopPadding() + 12.dp,
+                        bottom = innerPadding.calculateBottomPadding() + 16.dp
+                    )
             ) {
                 // Header Bar
                 Row(
@@ -243,7 +248,7 @@ fun PasteScreen() {
                 exit = fadeOut(),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 28.dp)
+                    .padding(bottom = innerPadding.calculateBottomPadding() + 24.dp)
             ) {
                 Box(
                     modifier = Modifier
