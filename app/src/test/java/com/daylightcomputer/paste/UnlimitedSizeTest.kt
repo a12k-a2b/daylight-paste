@@ -69,7 +69,7 @@ class UnlimitedSizeTest {
         val stripped = MarkdownTranspiler.stripFormatting(hugeText)
         val elapsed = System.currentTimeMillis() - startTime
 
-        assertEquals("Chapter 0: SolOS LivePaper provides distraction-free computing with 90Hz peak refresh...", title)
+        assertEquals("Chapter 0: SolOS LivePaper provides distraction-free computing with 90Hz peak...", title)
         assertEquals(ClipType.TEXT, clipType)
         assertTrue("Stripped text must retain content", stripped.length > 400_000)
         assertTrue("Processing 500k characters should complete in under 5 seconds", elapsed < 5000)

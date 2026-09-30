@@ -409,7 +409,7 @@ object MarkdownTranspiler {
             .replace(Regex("\\*\\*"), "")
             .replace(Regex("^\\|\\s*"), "")
             .trim()
-        return if (clean.length > 80) clean.take(77) + "..." else clean
+        return if (clean.length > 80) clean.take(77).trimEnd() + "..." else clean
     }
 }
 
