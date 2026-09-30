@@ -155,6 +155,9 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
             "LINKS" -> {
                 clauses.add("$COL_CLIP_TYPE = 'URL'")
             }
+            "IMAGES" -> {
+                clauses.add("$COL_CLIP_TYPE = 'IMAGE'")
+            }
             else -> {
                 // ALL: no type filter
             }

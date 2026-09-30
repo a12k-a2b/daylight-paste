@@ -73,6 +73,7 @@ fun ClipCard(
                     ClipType.MARKDOWN -> Triple("MARKDOWN", DaylightColors.AmberSoft, DaylightColors.AmberDeep)
                     ClipType.CODE -> Triple("CODE", DaylightColors.SurfaceCream, DaylightColors.InkBlack)
                     ClipType.URL -> Triple("LINK", DaylightColors.SurfaceCream, DaylightColors.Indigo)
+                    ClipType.IMAGE -> Triple("IMAGE", DaylightColors.AmberSoft, DaylightColors.Terracotta)
                     ClipType.TEXT -> Triple("TEXT", DaylightColors.SurfaceCream, DaylightColors.InkSubtle)
                 }
 
