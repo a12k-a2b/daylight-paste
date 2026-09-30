@@ -11,7 +11,8 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
 
     companion object {
         const val DATABASE_NAME = "daylight_paste.db"
-        const val DATABASE_VERSION = 2
+        const val DATABASE_VERSION = 3
+        const val TABLE_FTS = "clips_fts"
 
         const val TABLE_CLIPS = "clips"
         const val COL_ID = "id"
@@ -69,6 +70,40 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_clips_created_at ON $TABLE_CLIPS($COL_CREATED_AT DESC)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_clips_pinned ON $TABLE_CLIPS($COL_IS_PINNED, $COL_CREATED_AT DESC)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_clips_type ON $TABLE_CLIPS($COL_CLIP_TYPE)")
+
+        // FTS4 Virtual Table for sub-millisecond lexical search
+        db.execSQL("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS $TABLE_FTS USING fts4(
+                content="$TABLE_CLIPS",
+                $COL_TITLE,
+                $COL_TEXT_CONTENT,
+                $COL_SUMMARY
+            )
+        """.trimIndent())
+
+        // Keep FTS4 table synced with main clips table
+        db.execSQL("""
+            CREATE TRIGGER IF NOT EXISTS clips_bu BEFORE UPDATE ON $TABLE_CLIPS BEGIN
+                DELETE FROM $TABLE_FTS WHERE docid = old.$COL_ID;
+            END;
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TRIGGER IF NOT EXISTS clips_bd BEFORE DELETE ON $TABLE_CLIPS BEGIN
+                DELETE FROM $TABLE_FTS WHERE docid = old.$COL_ID;
+            END;
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TRIGGER IF NOT EXISTS clips_au AFTER UPDATE ON $TABLE_CLIPS BEGIN
+                INSERT INTO $TABLE_FTS(docid, $COL_TITLE, $COL_TEXT_CONTENT, $COL_SUMMARY)
+                VALUES(new.$COL_ID, new.$COL_TITLE, new.$COL_TEXT_CONTENT, new.$COL_SUMMARY);
+            END;
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TRIGGER IF NOT EXISTS clips_ai AFTER INSERT ON $TABLE_CLIPS BEGIN
+                INSERT INTO $TABLE_FTS(docid, $COL_TITLE, $COL_TEXT_CONTENT, $COL_SUMMARY)
+                VALUES(new.$COL_ID, new.$COL_TITLE, new.$COL_TEXT_CONTENT, new.$COL_SUMMARY);
+            END;
+        """.trimIndent())
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -81,6 +116,16 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
             } catch (ignored: Exception) {}
             try {
                 db.execSQL("ALTER TABLE $TABLE_CLIPS ADD COLUMN $COL_EMBEDDING BLOB")
+            } catch (ignored: Exception) {}
+        }
+        if (oldVersion < 3) {
+            try {
+                db.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS $TABLE_FTS USING fts4(content=\"$TABLE_CLIPS\", $COL_TITLE, $COL_TEXT_CONTENT, $COL_SUMMARY)")
+                db.execSQL("INSERT INTO $TABLE_FTS(docid, $COL_TITLE, $COL_TEXT_CONTENT, $COL_SUMMARY) SELECT $COL_ID, $COL_TITLE, $COL_TEXT_CONTENT, $COL_SUMMARY FROM $TABLE_CLIPS")
+                db.execSQL("CREATE TRIGGER IF NOT EXISTS clips_bu BEFORE UPDATE ON $TABLE_CLIPS BEGIN DELETE FROM $TABLE_FTS WHERE docid = old.$COL_ID; END;")
+                db.execSQL("CREATE TRIGGER IF NOT EXISTS clips_bd BEFORE DELETE ON $TABLE_CLIPS BEGIN DELETE FROM $TABLE_FTS WHERE docid = old.$COL_ID; END;")
+                db.execSQL("CREATE TRIGGER IF NOT EXISTS clips_au AFTER UPDATE ON $TABLE_CLIPS BEGIN INSERT INTO $TABLE_FTS(docid, $COL_TITLE, $COL_TEXT_CONTENT, $COL_SUMMARY) VALUES(new.$COL_ID, new.$COL_TITLE, new.$COL_TEXT_CONTENT, new.$COL_SUMMARY); END;")
+                db.execSQL("CREATE TRIGGER IF NOT EXISTS clips_ai AFTER INSERT ON $TABLE_CLIPS BEGIN INSERT INTO $TABLE_FTS(docid, $COL_TITLE, $COL_TEXT_CONTENT, $COL_SUMMARY) VALUES(new.$COL_ID, new.$COL_TITLE, new.$COL_TEXT_CONTENT, new.$COL_SUMMARY); END;")
             } catch (ignored: Exception) {}
         }
     }
@@ -151,7 +196,12 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
         return null
     }
 
-    fun getClips(filterType: String = "ALL", searchQuery: String = "", limit: Int = 200): List<DaylightClip> {
+    fun getClips(
+        filterType: String = "ALL",
+        searchQuery: String = "",
+        limit: Int = 200,
+        lightweight: Boolean = true
+    ): List<DaylightClip> {
         val db = readableDatabase
         val clauses = mutableListOf<String>()
         val args = mutableListOf<String>()
@@ -181,19 +231,56 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
         }
 
         if (searchQuery.isNotBlank()) {
-            clauses.add("($COL_TEXT_CONTENT LIKE ? OR $COL_TITLE LIKE ? OR $COL_SOURCE_PACKAGE LIKE ? OR $COL_CLIP_TYPE LIKE ? OR ($COL_SUMMARY IS NOT NULL AND $COL_SUMMARY LIKE ?))")
-            val param = "%$searchQuery%"
-            args.add(param)
-            args.add(param)
-            args.add(param)
-            args.add(param)
-            args.add(param)
+            val cleanTerm = searchQuery.trim().replace(Regex("[*\"']"), "").trim()
+            var ftsSucceeded = false
+            if (cleanTerm.isNotEmpty()) {
+                val ftsQuery = "$cleanTerm*"
+                try {
+                    val testCursor = db.rawQuery("SELECT docid FROM $TABLE_FTS WHERE $TABLE_FTS MATCH ? LIMIT 1", arrayOf(ftsQuery))
+                    testCursor.close()
+                    clauses.add("$COL_ID IN (SELECT docid FROM $TABLE_FTS WHERE $TABLE_FTS MATCH ?)")
+                    args.add(ftsQuery)
+                    ftsSucceeded = true
+                } catch (ignored: Exception) {}
+            }
+
+            if (!ftsSucceeded) {
+                clauses.add("($COL_TEXT_CONTENT LIKE ? OR $COL_TITLE LIKE ? OR $COL_SOURCE_PACKAGE LIKE ? OR $COL_CLIP_TYPE LIKE ? OR ($COL_SUMMARY IS NOT NULL AND $COL_SUMMARY LIKE ?))")
+                val param = "%$searchQuery%"
+                args.add(param)
+                args.add(param)
+                args.add(param)
+                args.add(param)
+                args.add(param)
+            }
         }
 
         val whereClause = if (clauses.isNotEmpty()) clauses.joinToString(" AND ") else null
+        val projection = if (lightweight) {
+            arrayOf(
+                COL_ID,
+                "substr($COL_TEXT_CONTENT, 1, 300) AS $COL_TEXT_CONTENT",
+                "'' AS $COL_MARKDOWN_CONTENT",
+                "'' AS $COL_HTML_CONTENT",
+                COL_IMAGE_URI,
+                COL_SUMMARY,
+                COL_EMBEDDING,
+                COL_TITLE,
+                COL_CLIP_TYPE,
+                COL_CHAR_COUNT,
+                COL_WORD_COUNT,
+                COL_SOURCE_PACKAGE,
+                COL_IS_PINNED,
+                COL_PINBOARD,
+                COL_CREATED_AT
+            )
+        } else {
+            null
+        }
+
         val cursor = db.query(
             TABLE_CLIPS,
-            null,
+            projection,
             whereClause,
             if (args.isNotEmpty()) args.toTypedArray() else null,
             null,

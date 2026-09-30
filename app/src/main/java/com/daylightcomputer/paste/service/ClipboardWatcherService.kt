@@ -104,7 +104,7 @@ class ClipboardWatcherService : Service() {
                 val clipType = MarkdownTranspiler.detectClipType(markdownContent, htmlText)
                 val title = MarkdownTranspiler.extractTitle(markdownContent.ifBlank { content })
                 val charCount = markdownContent.length
-                val wordCount = markdownContent.split(Regex("\\s+")).filter { it.isNotBlank() }.size
+                val wordCount = MarkdownTranspiler.countWords(markdownContent)
                 
                 var sourcePackage = "System"
                 try {

@@ -32,6 +32,12 @@ class ClipImportReceiver : BroadcastReceiver() {
                 return
             }
 
+            // Strict payload bounds to prevent memory/CPU denial-of-service
+            if (rawText.length > 500_000 || (rawHtml != null && rawHtml.length > 500_000)) {
+                android.util.Log.w("ClipImportReceiver", "Rejected oversized broadcast payload (>500k chars)")
+                return
+            }
+
             val pendingResult = goAsync()
             CoroutineScope(Dispatchers.IO).launch {
                 try {

@@ -484,5 +484,24 @@ object MarkdownTranspiler {
             .trim()
         return if (clean.length > 80) clean.take(77).trimEnd() + "..." else clean
     }
+
+    /**
+     * High-speed, streaming single-pass word counter that allocates zero intermediate lists.
+     * Operates in O(N) time and O(1) memory, safe for multi-megabyte texts on Helio G99.
+     */
+    fun countWords(text: CharSequence): Int {
+        var count = 0
+        var inWord = false
+        for (i in 0 until text.length) {
+            val c = text[i]
+            if (c.isWhitespace()) {
+                inWord = false
+            } else if (!inWord) {
+                inWord = true
+                count++
+            }
+        }
+        return count
+    }
 }
 
