@@ -44,6 +44,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.daylightcomputer.paste.ai.ScoredClip
+import com.daylightcomputer.paste.ai.SemanticSearchManager
 import com.daylightcomputer.paste.data.ClipDatabase
 import com.daylightcomputer.paste.data.DaylightClip
 import com.daylightcomputer.paste.service.DaylightPasteManager
@@ -64,10 +66,14 @@ fun PasteScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val db = remember { ClipDatabase.getInstance(context) }
+    val searchManager = remember { SemanticSearchManager.getInstance(context) }
 
     var searchQuery by remember { mutableStateOf("") }
+    var isAiMode by remember { mutableStateOf(true) }
     var selectedFilter by remember { mutableStateOf("ALL") }
     var clips by remember { mutableStateOf<List<DaylightClip>>(emptyList()) }
+    var scoredClips by remember { mutableStateOf<List<ScoredClip>>(emptyList()) }
+    var aiAnswer by remember { mutableStateOf<String?>(null) }
     var activeReaderClip by remember { mutableStateOf<DaylightClip?>(null) }
     var confirmationMessage by remember { mutableStateOf<String?>(null) }
 
@@ -83,14 +89,20 @@ fun PasteScreen() {
     // Refresh clips helper
     fun refreshClips() {
         scope.launch(Dispatchers.IO) {
-            val list = db.getClips(filterType = selectedFilter, searchQuery = searchQuery)
+            val result = searchManager.search(
+                query = searchQuery,
+                filterType = selectedFilter,
+                isSemanticMode = isAiMode
+            )
             withContext(Dispatchers.Main) {
-                clips = list
+                scoredClips = result.scoredClips
+                clips = result.scoredClips.map { it.clip }
+                aiAnswer = result.aiAnswer
             }
         }
     }
 
-    LaunchedEffect(selectedFilter, searchQuery) {
+    LaunchedEffect(selectedFilter, searchQuery, isAiMode) {
         refreshClips()
     }
 
@@ -169,8 +181,41 @@ fun PasteScreen() {
                 // Search Bar
                 SearchBar(
                     query = searchQuery,
-                    onQueryChange = { searchQuery = it }
+                    onQueryChange = { searchQuery = it },
+                    isAiMode = isAiMode,
+                    onToggleAiMode = { isAiMode = !isAiMode }
                 )
+
+                // AI Answer Card (when query is a natural-language question)
+                if (!aiAnswer.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(DaylightColors.AmberSoft)
+                            .border(1.5.dp, DaylightColors.AmberDeep, RoundedCornerShape(10.dp))
+                            .padding(12.dp)
+                    ) {
+                        Column {
+                            Text(
+                                text = "✨ AI ANSWER",
+                                fontFamily = DaylightFontFamilies.RomExtendedLight,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = DaylightColors.AmberDeep,
+                                letterSpacing = 1.2.sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = aiAnswer!!,
+                                fontFamily = DaylightFontFamilies.ArizonaSans,
+                                fontSize = 14.sp,
+                                color = DaylightColors.InkBlack
+                            )
+                        }
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(14.dp))
 
@@ -212,9 +257,11 @@ fun PasteScreen() {
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                         contentPadding = PaddingValues(bottom = 32.dp)
                     ) {
-                        items(clips, key = { it.id }) { clip ->
+                        items(scoredClips, key = { it.clip.id }) { scoredClip ->
+                            val clip = scoredClip.clip
                             ClipCard(
                                 clip = clip,
+                                semanticScore = if (searchQuery.isNotBlank() && isAiMode) scoredClip.score else null,
                                 onCopyMarkdown = {
                                     DaylightPasteManager.copyAsMarkdown(context, clip)
                                     confirmationMessage = "Copied Clean Markdown to Clipboard"

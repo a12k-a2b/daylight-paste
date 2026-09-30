@@ -245,6 +245,36 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
         return null
     }
 
+    fun updateClipEmbedding(clipId: Long, embedding: ByteArray): Boolean {
+        val db = writableDatabase
+        val values = ContentValues().apply {
+            put(COL_EMBEDDING, embedding)
+        }
+        val rows = db.update(TABLE_CLIPS, values, "$COL_ID = ?", arrayOf(clipId.toString()))
+        return rows > 0
+    }
+
+    fun getClipsNeedingEmbedding(limit: Int = 50): List<DaylightClip> {
+        val db = readableDatabase
+        val cursor = db.query(
+            TABLE_CLIPS,
+            null,
+            "$COL_EMBEDDING IS NULL",
+            null,
+            null,
+            null,
+            "$COL_CREATED_AT DESC",
+            limit.toString()
+        )
+        val results = mutableListOf<DaylightClip>()
+        cursor.use {
+            while (it.moveToNext()) {
+                results.add(parseCursor(it))
+            }
+        }
+        return results
+    }
+
     fun clearHistory(keepPinned: Boolean = true): Int {
         val db = writableDatabase
         val where = if (keepPinned) "$COL_IS_PINNED = 0" else null

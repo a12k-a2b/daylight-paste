@@ -131,6 +131,13 @@ class ClipboardWatcherService : Service() {
 
                 database.insertClip(daylightClip)
 
+                // Background vectorization for semantic AI search
+                scope.launch {
+                    try {
+                        com.daylightcomputer.paste.ai.SemanticSearchManager.getInstance(this@ClipboardWatcherService).vectorizeMissingClips()
+                    } catch (ignored: Exception) {}
+                }
+
                 // Show SolOS LivePaper HUD if copied from an external app
                 val isInternal = (sourcePackage == packageName) ||
                         DaylightPasteManager.isRecentInternalCopy(content) ||
@@ -255,6 +262,13 @@ class ClipboardWatcherService : Service() {
             )
 
             database.insertClip(daylightClip)
+
+            // Background vectorization for semantic AI search
+            scope.launch {
+                try {
+                    com.daylightcomputer.paste.ai.SemanticSearchManager.getInstance(this@ClipboardWatcherService).vectorizeMissingClips()
+                } catch (ignored: Exception) {}
+            }
 
             val isInternal = (sourcePackage == packageName) ||
                     DaylightPasteManager.isRecentInternalCopy(localUri)

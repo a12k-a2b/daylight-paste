@@ -67,6 +67,7 @@ fun ClipCard(
     onTogglePin: () -> Unit,
     onDelete: () -> Unit,
     onOpenReader: () -> Unit,
+    semanticScore: Float? = null,
     modifier: Modifier = Modifier
 ) {
     val timeAgo = formatTimeAgo(clip.createdAt)
@@ -123,6 +124,26 @@ fun ClipCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
+
+                if (semanticScore != null && semanticScore > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 6.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(DaylightColors.AmberSoft)
+                            .border(1.dp, DaylightColors.AmberDeep, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "✨ ${(semanticScore * 100).toInt()}%",
+                            fontFamily = DaylightFontFamilies.RomExtendedLight,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DaylightColors.AmberDeep,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                }
 
                 IconButton(
                     onClick = onTogglePin,
