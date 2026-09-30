@@ -307,13 +307,19 @@ class ProcessPasteActivity : ComponentActivity() {
 
     private fun onClipSelected(textToPaste: String, isReadOnly: Boolean, originalClip: DaylightClip) {
         if (!isReadOnly) {
+            // Cap at safe Binder payload size (100k UTF-16 chars ~ 200KB) to prevent TransactionTooLargeException
+            val safeText = if (textToPaste.length > 100_000) textToPaste.take(100_000) else textToPaste
             val resultIntent = Intent().apply {
-                putExtra(Intent.EXTRA_PROCESS_TEXT, textToPaste)
+                putExtra(Intent.EXTRA_PROCESS_TEXT, safeText)
             }
             setResult(RESULT_OK, resultIntent)
         } else {
-            // In read-only contexts, place clean text on clipboard
-            DaylightPasteManager.copyAsMarkdown(this, originalClip)
+            // In read-only contexts, place the user's selected format (PLAIN or MARKDOWN) on clipboard
+            val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            val safeText = if (textToPaste.length > 400_000) textToPaste.take(400_000) else textToPaste
+            DaylightPasteManager.markInternalCopy(safeText)
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText(originalClip.title, safeText))
+            android.widget.Toast.makeText(this, "✓ Copied to Clipboard", android.widget.Toast.LENGTH_SHORT).show()
         }
         finish()
     }

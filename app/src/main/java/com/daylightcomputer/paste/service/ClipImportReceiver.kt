@@ -14,8 +14,6 @@ import kotlinx.coroutines.launch
 
 class ClipImportReceiver : BroadcastReceiver() {
 
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == ACTION_INSERT_CLIP) {
             val rawText = intent.getStringExtra(EXTRA_TEXT) ?: ""
@@ -25,34 +23,44 @@ class ClipImportReceiver : BroadcastReceiver() {
 
             if (rawText.isBlank() && rawHtml.isNullOrBlank()) return
 
-            scope.launch {
-                val markdownContent = if (!rawHtml.isNullOrBlank()) {
-                    MarkdownTranspiler.transpileHtmlToMarkdown(rawHtml)
-                } else {
-                    rawText
+            val pendingResult = goAsync()
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val markdownContent = when {
+                        !rawHtml.isNullOrBlank() -> MarkdownTranspiler.transpileHtmlToMarkdown(rawHtml)
+                        MarkdownTranspiler.looksLikeHtml(rawText) -> MarkdownTranspiler.transpileHtmlToMarkdown(rawText)
+                        else -> MarkdownTranspiler.stripInlineCitations(rawText)
+                    }
+
+                    val clipType = MarkdownTranspiler.detectClipType(markdownContent, rawHtml)
+                    val title = MarkdownTranspiler.extractTitle(markdownContent.ifBlank { rawText })
+                    val charCount = markdownContent.length
+                    val wordCount = markdownContent.split(Regex("\\s+")).filter { it.isNotBlank() }.size
+
+                    val clip = DaylightClip(
+                        textContent = rawText.ifBlank { markdownContent },
+                        markdownContent = markdownContent,
+                        htmlContent = rawHtml,
+                        title = title,
+                        clipType = clipType,
+                        charCount = charCount,
+                        wordCount = wordCount,
+                        sourcePackage = sourcePkg,
+                        isPinned = isPinned,
+                        pinboard = if (isPinned) "PINNED" else "ALL",
+                        createdAt = System.currentTimeMillis()
+                    )
+
+                    val db = ClipDatabase.getInstance(context)
+                    db.insertClip(clip)
+
+                    // Trigger SolOS Amber Pill HUD
+                    DaylightClipboardHud(context.applicationContext).show(clip)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                } finally {
+                    pendingResult.finish()
                 }
-
-                val clipType = MarkdownTranspiler.detectClipType(markdownContent, rawHtml)
-                val title = MarkdownTranspiler.extractTitle(markdownContent.ifBlank { rawText })
-                val charCount = markdownContent.length
-                val wordCount = markdownContent.split(Regex("\\s+")).filter { it.isNotBlank() }.size
-
-                val clip = DaylightClip(
-                    textContent = rawText.ifBlank { markdownContent },
-                    markdownContent = markdownContent,
-                    htmlContent = rawHtml,
-                    title = title,
-                    clipType = clipType,
-                    charCount = charCount,
-                    wordCount = wordCount,
-                    sourcePackage = sourcePkg,
-                    isPinned = isPinned,
-                    pinboard = if (isPinned) "PINNED" else "ALL",
-                    createdAt = System.currentTimeMillis()
-                )
-
-                val db = ClipDatabase.getInstance(context)
-                db.insertClip(clip)
             }
         }
     }
