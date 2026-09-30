@@ -46,11 +46,9 @@ object DaylightPasteManager {
 
             markInternalCopy(safeText)
 
-            val clipData = if (!clip.htmlContent.isNullOrBlank()) {
-                ClipData.newHtmlText(clip.title, safeText, clip.htmlContent)
-            } else {
-                ClipData.newPlainText(clip.title, safeText)
-            }
+            // When copying as Markdown, we must put the clean CommonMark text as plain text
+            // so rich editors (Day One, Obsidian, Claude, etc.) do NOT paste the original messy HTML.
+            val clipData = ClipData.newPlainText(clip.title, safeText)
 
             clipboard.setPrimaryClip(clipData)
             true

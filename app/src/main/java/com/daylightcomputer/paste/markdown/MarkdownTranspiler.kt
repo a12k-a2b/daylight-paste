@@ -17,7 +17,10 @@ enum class ClipType {
  */
 object MarkdownTranspiler {
 
-    private val HTML_TAG_PATTERN = Pattern.compile("<[^>]+>", Pattern.DOTALL)
+    private val HTML_TAG_PATTERN = Pattern.compile("</?[a-zA-Z][^>]*>", Pattern.DOTALL)
+    private val SCRIPT_PATTERN = Pattern.compile("<script(?:\\s+[^>]*)?>.*?</script>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
+    private val STYLE_PATTERN = Pattern.compile("<style(?:\\s+[^>]*)?>.*?</style>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
+    private val NOSCRIPT_PATTERN = Pattern.compile("<noscript(?:\\s+[^>]*)?>.*?</noscript>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
     private val CODE_BLOCK_PATTERN = Pattern.compile("<pre(?:\\s+[^>]*)?>\\s*<code(?:\\s+class=[\"'](?:language-)?([a-zA-Z0-9_-]+)[\"'])?(?:\\s+[^>]*)?>(.*?)</code>\\s*</pre>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
     private val PRE_PATTERN = Pattern.compile("<pre(?:\\s+[^>]*)?>(.*?)</pre>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
     private val TABLE_PATTERN = Pattern.compile("<table(?:\\s+[^>]*)?>(.*?)</table>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
@@ -33,14 +36,34 @@ object MarkdownTranspiler {
     private val OL_PATTERN = Pattern.compile("<ol(?:\\s+[^>]*)?>(.*?)</ol>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
     private val UL_PATTERN = Pattern.compile("<ul(?:\\s+[^>]*)?>(.*?)</ul>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
     private val LI_PATTERN = Pattern.compile("<li(?:\\s+[^>]*)?>(.*?)</li>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    private val SUP_CITATION_PATTERN = Pattern.compile("<sup(?:\\s+[^>]*)?>\\s*(?:<a[^>]*>)?\\s*\\[?(\\d+|citation needed|note\\s*\\d+)\\]?\\s*(?:</a>)?\\s*</sup>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
+    private val SUP_CITATION_PATTERN = Pattern.compile("<sup(?:\\s+[^>]*)?>\\s*(?:<a[^>]*>)?\\s*\\[?([1-9]\\d*(?:[-,]\\s*[1-9]\\d*)*|citation needed|note\\s*\\d+)\\]?\\s*(?:</a>)?\\s*</sup>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
+    
+    // Precompiled heading patterns for h1..h6
+    private val HEADING_PATTERNS = (1..6).map { i ->
+        Pattern.compile("<h$i(?:\\s+[^>]*)?>(.*?)</h$i>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
+    }
+
+    private val HTML_SNIFF_REGEX = Regex("<(html|body|div|p|span|a|h[1-6]|ul|ol|li|table|tr|td|th|pre|code|b|strong|i|em|br|hr)[^>]*>", RegexOption.IGNORE_CASE)
+
+    fun looksLikeHtml(text: String): Boolean {
+        return HTML_SNIFF_REGEX.containsMatchIn(text)
+    }
 
     fun transpileHtmlToMarkdown(html: String): String {
         if (html.isBlank()) return ""
         var md = html
 
-        // 0. Clean web citations and footnotes (e.g., Wikipedia sup tags)
+        // 0a. Strip non-content script, style, and noscript blocks completely
+        md = SCRIPT_PATTERN.matcher(md).replaceAll("")
+        md = STYLE_PATTERN.matcher(md).replaceAll("")
+        md = NOSCRIPT_PATTERN.matcher(md).replaceAll("")
+
+        // 0b. Clean web citations and footnotes (e.g. Wikipedia sup tags)
         md = SUP_CITATION_PATTERN.matcher(md).replaceAll("")
+
+        // Vault away code blocks and inline code so they are protected from all subsequent transforms
+        val codeBlocks = mutableListOf<String>()
+        val inlineCodes = mutableListOf<String>()
 
         // 1. Code blocks (<pre><code>)
         val codeBlockMatcher = CODE_BLOCK_PATTERN.matcher(md)
@@ -49,8 +72,9 @@ object MarkdownTranspiler {
             val lang = codeBlockMatcher.group(1)?.trim() ?: ""
             val rawInside = codeBlockMatcher.group(2) ?: ""
             val cleanCode = cleanCodeBlockContent(rawInside)
-            val replacement = "\n\n```$lang\n$cleanCode\n```\n\n"
-            codeBlockMatcher.appendReplacement(sbCode, MatcherUtil.quoteReplacement(replacement))
+            val placeholder = "%%%DAYLIGHT_CODE_BLOCK_${codeBlocks.size}%%%"
+            codeBlocks.add("```$lang\n$cleanCode\n```")
+            codeBlockMatcher.appendReplacement(sbCode, java.util.regex.Matcher.quoteReplacement("\n\n$placeholder\n\n"))
         }
         codeBlockMatcher.appendTail(sbCode)
         md = sbCode.toString()
@@ -61,25 +85,39 @@ object MarkdownTranspiler {
         while (preMatcher.find()) {
             val rawInside = preMatcher.group(1) ?: ""
             val cleanCode = cleanCodeBlockContent(rawInside)
-            val replacement = "\n\n```\n$cleanCode\n```\n\n"
-            preMatcher.appendReplacement(sbPre, MatcherUtil.quoteReplacement(replacement))
+            val placeholder = "%%%DAYLIGHT_CODE_BLOCK_${codeBlocks.size}%%%"
+            codeBlocks.add("```\n$cleanCode\n```")
+            preMatcher.appendReplacement(sbPre, java.util.regex.Matcher.quoteReplacement("\n\n$placeholder\n\n"))
         }
         preMatcher.appendTail(sbPre)
         md = sbPre.toString()
 
+        // 2b. Inline code <code>...</code>
+        val inlineCodeMatcher = INLINE_CODE_PATTERN.matcher(md)
+        val sbInline = StringBuffer()
+        while (inlineCodeMatcher.find()) {
+            val raw = inlineCodeMatcher.group(1) ?: ""
+            val clean = decodeHtmlEntities(raw.replace(Regex("<[^>]+>"), "")).trim()
+            val placeholder = "%%%DAYLIGHT_INLINE_CODE_${inlineCodes.size}%%%"
+            inlineCodes.add("`$clean`")
+            inlineCodeMatcher.appendReplacement(sbInline, java.util.regex.Matcher.quoteReplacement(placeholder))
+        }
+        inlineCodeMatcher.appendTail(sbInline)
+        md = sbInline.toString()
+
         // 3. Tables (convert <table>...</table> to GFM Markdown table)
         md = transpileTables(md)
 
-        // 4. Headings (h1 to h6)
+        // 4. Headings (h1 to h6) using precompiled patterns
         for (i in 1..6) {
-            val hPattern = Pattern.compile("<h$i(?:\\s+[^>]*)?>(.*?)</h$i>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
+            val hPattern = HEADING_PATTERNS[i - 1]
             val hMatcher = hPattern.matcher(md)
             val sbH = StringBuffer()
             val prefix = "#".repeat(i) + " "
             while (hMatcher.find()) {
                 val content = hMatcher.group(1)?.trim() ?: ""
                 val replacement = "\n\n$prefix$content\n\n"
-                hMatcher.appendReplacement(sbH, MatcherUtil.quoteReplacement(replacement))
+                hMatcher.appendReplacement(sbH, java.util.regex.Matcher.quoteReplacement(replacement))
             }
             hMatcher.appendTail(sbH)
             md = sbH.toString()
@@ -95,7 +133,7 @@ object MarkdownTranspiler {
             val content = bqMatcher.group(1)?.trim() ?: ""
             val lines = content.lines().joinToString("\n") { line -> "> " + line.trim() }
             val replacement = "\n\n$lines\n\n"
-            bqMatcher.appendReplacement(sbBq, MatcherUtil.quoteReplacement(replacement))
+            bqMatcher.appendReplacement(sbBq, java.util.regex.Matcher.quoteReplacement(replacement))
         }
         bqMatcher.appendTail(sbBq)
         md = sbBq.toString()
@@ -114,7 +152,7 @@ object MarkdownTranspiler {
                 idx++
             }
             val replacement = "\n\n" + listItems.joinToString("\n") + "\n\n"
-            olMatcher.appendReplacement(sbOl, MatcherUtil.quoteReplacement(replacement))
+            olMatcher.appendReplacement(sbOl, java.util.regex.Matcher.quoteReplacement(replacement))
         }
         olMatcher.appendTail(sbOl)
         md = sbOl.toString()
@@ -131,7 +169,7 @@ object MarkdownTranspiler {
                 listItems.add("- $item")
             }
             val replacement = "\n\n" + listItems.joinToString("\n") + "\n\n"
-            ulMatcher.appendReplacement(sbUl, MatcherUtil.quoteReplacement(replacement))
+            ulMatcher.appendReplacement(sbUl, java.util.regex.Matcher.quoteReplacement(replacement))
         }
         ulMatcher.appendTail(sbUl)
         md = sbUl.toString()
@@ -141,7 +179,7 @@ object MarkdownTranspiler {
         val sbLooseLi = StringBuffer()
         while (looseLiMatcher.find()) {
             val item = looseLiMatcher.group(1)?.trim() ?: ""
-            looseLiMatcher.appendReplacement(sbLooseLi, MatcherUtil.quoteReplacement("\n- $item"))
+            looseLiMatcher.appendReplacement(sbLooseLi, java.util.regex.Matcher.quoteReplacement("\n- $item"))
         }
         looseLiMatcher.appendTail(sbLooseLi)
         md = sbLooseLi.toString()
@@ -153,7 +191,7 @@ object MarkdownTranspiler {
             val src = imgMatcher.group(1)?.trim() ?: ""
             val alt = imgMatcher.group(2)?.trim() ?: "Image"
             val replacement = "![$alt]($src)"
-            imgMatcher.appendReplacement(sbImg, MatcherUtil.quoteReplacement(replacement))
+            imgMatcher.appendReplacement(sbImg, java.util.regex.Matcher.quoteReplacement(replacement))
         }
         imgMatcher.appendTail(sbImg)
         md = sbImg.toString()
@@ -165,7 +203,7 @@ object MarkdownTranspiler {
             val url = linkMatcher.group(1)?.trim() ?: ""
             val label = linkMatcher.group(2)?.trim() ?: url
             val replacement = if (label.isNotBlank()) "[$label]($url)" else url
-            linkMatcher.appendReplacement(sbLink, MatcherUtil.quoteReplacement(replacement))
+            linkMatcher.appendReplacement(sbLink, java.util.regex.Matcher.quoteReplacement(replacement))
         }
         linkMatcher.appendTail(sbLink)
         md = sbLink.toString()
@@ -186,10 +224,6 @@ object MarkdownTranspiler {
             val t = it.trim()
             if (t.isNotEmpty()) "~~$t~~" else ""
         }
-        // Inline code
-        md = replaceWithPattern(md, INLINE_CODE_PATTERN) {
-            "`" + decodeHtmlEntities(it).trim() + "`"
-        }
 
         // 12. Paragraphs and Linebreaks
         md = md.replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
@@ -198,16 +232,24 @@ object MarkdownTranspiler {
         md = md.replace(Regex("<div(?:\\s+[^>]*)?>", RegexOption.IGNORE_CASE), "\n")
         md = md.replace(Regex("</div>", RegexOption.IGNORE_CASE), "")
 
-        // 13. Strip any remaining unknown HTML tags
+        // 13. Strip any remaining HTML tags safely (matching real HTML tag names starting with a letter or /)
         md = HTML_TAG_PATTERN.matcher(md).replaceAll("")
 
         // 14. Decode remaining HTML entities
         md = decodeHtmlEntities(md)
 
-        // 15. Strip remaining Wikipedia-style inline citations like [1], [2], [1, 2] that are not markdown links or checkboxes
+        // 15. Strip remaining Wikipedia-style prose citations (code blocks/inline codes are vaulted)
         md = stripInlineCitations(md)
 
-        // 16. Normalize excessive whitespace & blank lines
+        // 16. Restore vaulted inline codes and code blocks
+        inlineCodes.forEachIndexed { index, code ->
+            md = md.replace("%%%DAYLIGHT_INLINE_CODE_${index}%%%", code)
+        }
+        codeBlocks.forEachIndexed { index, block ->
+            md = md.replace("%%%DAYLIGHT_CODE_BLOCK_${index}%%%", block)
+        }
+
+        // 17. Normalize excessive whitespace & blank lines
         md = md.replace(Regex("\n{3,}"), "\n\n").trim()
 
         return md
@@ -275,7 +317,7 @@ object MarkdownTranspiler {
             }
             mdTable.append("\n")
 
-            tableMatcher.appendReplacement(sb, MatcherUtil.quoteReplacement(mdTable.toString()))
+            tableMatcher.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(mdTable.toString()))
         }
         tableMatcher.appendTail(sb)
         return sb.toString()
@@ -291,14 +333,43 @@ object MarkdownTranspiler {
     }
 
     /**
-     * Strips bracketed citation markers e.g. [1], [2], [1, 2], [1-3], [citation needed]
-     * while preserving markdown links [text](url), task list checkboxes [ ], [x], and array indexes.
+     * Strips bracketed prose citation markers e.g. [1], [42], [1, 2], [1-3], [citation needed]
+     * while strictly preserving:
+     * - Markdown links [text](url)
+     * - Task list checkboxes [ ], [x]
+     * - Programming array/index accesses (e.g. arr[0], items[1])
+     * - Fenced or inline code blocks (vaulted or delimited with backticks)
      */
     fun stripInlineCitations(text: String): String {
-        // Matches [1], [42], [1, 2], [1-3], [citation needed], [note 1] when NOT immediately followed by (
-        // and NOT a markdown task checkbox [ ] or [x]
-        val citationPattern = Pattern.compile("(?<!\\[)(?<!\\!)\\[(\\d+(?:[-,]\\s*\\d+)*|citation needed|note\\s*\\d+)\\](?!\\()", Pattern.CASE_INSENSITIVE)
-        return citationPattern.matcher(text).replaceAll("")
+        // Citations in prose are:
+        // 1. Bracketed non-zero digits e.g. [1], [2], [1, 2], [1-3] or [citation needed] or [note 1]
+        // 2. NOT immediately followed by ( (which would be a markdown link)
+        // 3. NOT an array access (i.e. not immediately preceded by an identifier character [a-zA-Z0-9_])
+        // 4. Citation numbers start at 1 (not 0, which is universally code index)
+        // 5. Handles optional leading space so "word [1]." cleans cleanly to "word."
+        val citationWithLeadingSpace = Pattern.compile("(?<![a-zA-Z0-9_\\[\\!])\\s*\\[([1-9]\\d*(?:[-,]\\s*[1-9]\\d*)*|citation needed|note\\s*\\d+)\\](?!\\()", Pattern.CASE_INSENSITIVE)
+        
+        // Clean citations that have backtick-delimited code on lines:
+        // We only strip citations outside backtick segments
+        val lines = text.split("\n")
+        val processedLines = lines.map { line ->
+            if (!line.contains("`")) {
+                citationWithLeadingSpace.matcher(line).replaceAll("")
+            } else {
+                // Split line by backticks: even index = outside code, odd index = inside code
+                val parts = line.split("`")
+                val sb = StringBuilder()
+                for (i in parts.indices) {
+                    if (i % 2 == 0) {
+                        sb.append(citationWithLeadingSpace.matcher(parts[i]).replaceAll(""))
+                    } else {
+                        sb.append("`").append(parts[i]).append("`")
+                    }
+                }
+                sb.toString()
+            }
+        }
+        return processedLines.joinToString("\n")
     }
 
     private fun replaceWithPattern(input: String, pattern: Pattern, transform: (String) -> String): String {
@@ -307,7 +378,7 @@ object MarkdownTranspiler {
         while (matcher.find()) {
             val content = matcher.group(1) ?: ""
             val replacement = transform(content)
-            matcher.appendReplacement(sb, MatcherUtil.quoteReplacement(replacement))
+            matcher.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(replacement))
         }
         matcher.appendTail(sb)
         return sb.toString()
@@ -393,7 +464,7 @@ object MarkdownTranspiler {
                 (trimmed.contains("\n- ") || trimmed.contains("\n* ")) ||
                 (trimmed.contains("| ") && trimmed.contains(" |") && trimmed.contains("---"))
 
-        if (hasMarkdownTokens || (!rawHtml.isNullOrBlank() && rawHtml.contains("<"))) {
+        if (hasMarkdownTokens || (!rawHtml.isNullOrBlank() && looksLikeHtml(rawHtml))) {
             return ClipType.MARKDOWN
         }
 
@@ -413,21 +484,3 @@ object MarkdownTranspiler {
     }
 }
 
-/**
- * Matcher replacement quoting helper compatible across Android versions.
- */
-object MatcherUtil {
-    fun quoteReplacement(s: String): String {
-        if (!s.contains('\\') && !s.contains('$')) {
-            return s
-        }
-        val sb = StringBuilder()
-        for (c in s) {
-            if (c == '\\' || c == '$') {
-                sb.append('\\')
-            }
-            sb.append(c)
-        }
-        return sb.toString()
-    }
-}

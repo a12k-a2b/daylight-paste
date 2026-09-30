@@ -28,10 +28,10 @@ class ProcessCopyActivity : Activity() {
         if (selectedText.isNotBlank()) {
             val database = ClipDatabase.getInstance(applicationContext)
             val clipType = MarkdownTranspiler.detectClipType(selectedText)
-            val markdownContent = if (clipType == ClipType.MARKDOWN || clipType == ClipType.CODE) {
-                selectedText
-            } else {
-                MarkdownTranspiler.transpileHtmlToMarkdown(selectedText)
+            val markdownContent = when {
+                clipType == ClipType.MARKDOWN || clipType == ClipType.CODE -> selectedText
+                MarkdownTranspiler.looksLikeHtml(selectedText) -> MarkdownTranspiler.transpileHtmlToMarkdown(selectedText)
+                else -> MarkdownTranspiler.stripInlineCitations(selectedText)
             }
             val title = MarkdownTranspiler.extractTitle(markdownContent)
             val charCount = markdownContent.length
@@ -47,10 +47,8 @@ class ProcessCopyActivity : Activity() {
                 sourcePackage = callingPackage ?: "Tooltip Menu"
             )
 
-            // Persist immediately
-            CoroutineScope(Dispatchers.IO).launch {
-                database.insertClip(clip)
-            }
+            // Persist synchronously to ensure write finishes before activity finishes
+            database.insertClip(clip)
 
             DaylightPasteManager.copyAsMarkdown(this, clip)
 
