@@ -12,29 +12,9 @@ import android.os.IBinder
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ContentPaste
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationCompat
-import androidx.lifecycle.setViewTreeLifecycleOwner
-import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.daylightcomputer.paste.R
 import com.daylightcomputer.paste.ui.MainActivity
-import com.daylightcomputer.paste.ui.theme.DaylightColors
 
 class OverlayPasteService : Service() {
 
@@ -69,36 +49,52 @@ class OverlayPasteService : Service() {
             y = 0
         }
 
-        val composeView = ComposeView(this).apply {
-            setContent {
-                MaterialTheme {
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .background(DaylightColors.PaperBg)
-                            .border(2.dp, DaylightColors.BorderStrong, CircleShape)
-                            .clickable {
-                                // Launch main Daylight Paste on tap
-                                val appIntent = Intent(context, MainActivity::class.java).apply {
-                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                                }
-                                context.startActivity(appIntent)
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ContentPaste,
-                            contentDescription = "Open Daylight Paste",
-                            tint = DaylightColors.InkBlack,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
+        val density = resources.displayMetrics.density
+        val size = (48 * density).toInt()
+
+        val handleLayout = android.widget.FrameLayout(this).apply {
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(0xFFFAF8F5.toInt()) // DaylightColors.PaperBg
+                setStroke((2 * density).toInt(), 0xFF111111.toInt()) // DaylightColors.BorderStrong
+            }
+            elevation = 0f
+
+            val iconSize = (24 * density).toInt()
+            val imageView = android.widget.ImageView(context).apply {
+                val iconBitmap = android.graphics.Bitmap.createBitmap(iconSize, iconSize, android.graphics.Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(iconBitmap)
+                val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                    color = 0xFF111111.toInt()
+                    style = android.graphics.Paint.Style.STROKE
+                    strokeWidth = 2.2f * density
+                    strokeCap = android.graphics.Paint.Cap.ROUND
+                    strokeJoin = android.graphics.Paint.Join.ROUND
                 }
+                val w = iconSize.toFloat()
+                val h = iconSize.toFloat()
+                canvas.drawRoundRect(w * 0.22f, h * 0.26f, w * 0.78f, h * 0.88f, 3f * density, 3f * density, paint)
+                canvas.drawRoundRect(w * 0.35f, h * 0.12f, w * 0.65f, h * 0.30f, 2f * density, 2f * density, paint)
+                setImageBitmap(iconBitmap)
+                layoutParams = android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                    android.view.Gravity.CENTER
+                )
+            }
+            addView(imageView)
+
+            setOnClickListener {
+                try {
+                    val appIntent = Intent(context, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    }
+                    context.startActivity(appIntent)
+                } catch (ignored: Exception) {}
             }
         }
 
-        floatingHandleView = composeView
+        floatingHandleView = handleLayout
         try {
             windowManager?.addView(floatingHandleView, params)
         } catch (e: Exception) {
