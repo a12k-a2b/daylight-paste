@@ -73,13 +73,12 @@ class ClipboardWatcherService : Service() {
 
                 val content = if (rawText.isNotBlank()) rawText else htmlText ?: ""
                 
-                // Transpile HTML to Markdown if HTML is present
-                val markdownContent = if (!htmlText.isNullOrBlank()) {
-                    MarkdownTranspiler.transpileHtmlToMarkdown(htmlText)
-                } else if (MarkdownTranspiler.detectClipType(content) == ClipType.MARKDOWN) {
-                    content
-                } else {
-                    content
+                // Transpile HTML to Markdown if HTML is present, otherwise clean citations
+                val markdownContent = when {
+                    !htmlText.isNullOrBlank() -> MarkdownTranspiler.transpileHtmlToMarkdown(htmlText)
+                    MarkdownTranspiler.detectClipType(content) == ClipType.MARKDOWN -> content
+                    MarkdownTranspiler.looksLikeHtml(content) -> MarkdownTranspiler.transpileHtmlToMarkdown(content)
+                    else -> MarkdownTranspiler.stripInlineCitations(content)
                 }
 
                 val clipType = MarkdownTranspiler.detectClipType(markdownContent, htmlText)

@@ -140,4 +140,58 @@ class MarkdownTranspilerTest {
         val stripped = MarkdownTranspiler.stripFormatting(md)
         assertEquals("Title\n\nThis is very important with some code and Link.", stripped)
     }
+
+    @Test
+    fun testArrayIndexingNotMutilatedByCitationStripper() {
+        // Critical adversarial test: Array index [0], [1], [1, 2] must NEVER be stripped as citations
+        val codeLine = "val first = arr[0]\nval second = items[1]\nval elem = matrix[1, 2]"
+        val cleaned = MarkdownTranspiler.stripInlineCitations(codeLine)
+        assertEquals(codeLine, cleaned)
+
+        val htmlWithCode = "<pre><code>val x = arr[0] + items[1];</code></pre>"
+        val md = MarkdownTranspiler.transpileHtmlToMarkdown(htmlWithCode)
+        assertTrue("Code block must preserve arr[0]", md.contains("arr[0]"))
+        assertTrue("Code block must preserve items[1]", md.contains("items[1]"))
+
+        val inlineHtml = "<p>Use <code>data[0]</code> to access head element.</p>"
+        val mdInline = MarkdownTranspiler.transpileHtmlToMarkdown(inlineHtml)
+        assertTrue("Inline code must preserve data[0]", mdInline.contains("`data[0]`"))
+    }
+
+    @Test
+    fun testScriptAndStyleTagsCompletelyStripped() {
+        val dirtyHtml = """
+            <style>
+                .solos-theme { color: #111111; background: #FAF8F5; }
+            </style>
+            <script type="text/javascript">
+                function trackingBeacon() { fetch('/telemetry'); }
+            </script>
+            <p>Distraction-free LivePaper reading.</p>
+        """.trimIndent()
+        val md = MarkdownTranspiler.transpileHtmlToMarkdown(dirtyHtml)
+        assertTrue("Must not contain CSS styles", !md.contains("solos-theme"))
+        assertTrue("Must not contain JS code", !md.contains("trackingBeacon"))
+        assertEquals("Distraction-free LivePaper reading.", md.trim())
+    }
+
+    @Test
+    fun testMathComparisonsAndGenericsPreserved() {
+        val mathText = "In math, 3 < 5 and 7 > 2 is always true."
+        // HTML transpiler must not eat '< 5 and 7 >' as an HTML tag
+        val md = MarkdownTranspiler.transpileHtmlToMarkdown(mathText)
+        assertTrue("Must keep '< 5' comparison", md.contains("3 < 5"))
+        assertTrue("Must keep '7 > 2' comparison", md.contains("7 > 2"))
+
+        val genericsHtml = "<p>Return type is <code>List&lt;String&gt;</code> with generics.</p>"
+        val mdGenerics = MarkdownTranspiler.transpileHtmlToMarkdown(genericsHtml)
+        assertTrue("Generics must be decoded cleanly in inline code", mdGenerics.contains("`List<String>`"))
+    }
+
+    @Test
+    fun testProseCitationWhitespaceCleaning() {
+        val textWithSpace = "The breakthrough was confirmed [1]. Following that, another test [2] succeeded."
+        val cleaned = MarkdownTranspiler.stripInlineCitations(textWithSpace)
+        assertEquals("The breakthrough was confirmed. Following that, another test succeeded.", cleaned)
+    }
 }
