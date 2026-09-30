@@ -181,7 +181,13 @@ class ProcessPasteActivity : ComponentActivity() {
                                                 .clip(RoundedCornerShape(8.dp))
                                                 .border(1.5.dp, DaylightColors.BorderSubtle, RoundedCornerShape(8.dp))
                                                 .clickable {
-                                                    onClipSelected(clip.markdownContent, isReadOnly, clip)
+                                                    if (clip.isImage) {
+                                                        DaylightPasteManager.copyImageToClipboard(this@ProcessPasteActivity, clip)
+                                                        android.widget.Toast.makeText(this@ProcessPasteActivity, "✓ Copied Image to Clipboard", android.widget.Toast.LENGTH_SHORT).show()
+                                                        finish()
+                                                    } else {
+                                                        onClipSelected(clip.markdownContent, isReadOnly, clip)
+                                                    }
                                                 },
                                             color = DaylightColors.CardBg,
                                             shadowElevation = 0.dp
@@ -205,8 +211,8 @@ class ProcessPasteActivity : ComponentActivity() {
                                                         modifier = Modifier.weight(1f)
                                                     )
                                                     
-                                                    val badgeBg = if (clip.clipType == ClipType.MARKDOWN) DaylightColors.AmberSoft else DaylightColors.SurfaceCream
-                                                    val badgeText = if (clip.clipType == ClipType.MARKDOWN) DaylightColors.AmberDeep else DaylightColors.InkBlack
+                                                    val badgeBg = if (clip.clipType == ClipType.MARKDOWN || clip.clipType == ClipType.IMAGE) DaylightColors.AmberSoft else DaylightColors.SurfaceCream
+                                                    val badgeText = if (clip.clipType == ClipType.MARKDOWN || clip.clipType == ClipType.IMAGE) DaylightColors.AmberDeep else DaylightColors.InkBlack
 
                                                     Surface(
                                                         color = badgeBg,
@@ -228,14 +234,25 @@ class ProcessPasteActivity : ComponentActivity() {
 
                                                 Spacer(modifier = Modifier.height(4.dp))
 
-                                                Text(
-                                                    text = clip.markdownContent.trim(),
-                                                    fontFamily = DaylightFontFamilies.ArizonaSans,
-                                                    fontSize = 13.sp,
-                                                    color = DaylightColors.InkSubtle,
-                                                    maxLines = 2,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
+                                                if (clip.isImage) {
+                                                    Text(
+                                                        text = clip.summary ?: "Image",
+                                                        fontFamily = DaylightFontFamilies.ArizonaSans,
+                                                        fontSize = 13.sp,
+                                                        color = DaylightColors.InkSubtle,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                } else {
+                                                    Text(
+                                                        text = clip.markdownContent.trim(),
+                                                        fontFamily = DaylightFontFamilies.ArizonaSans,
+                                                        fontSize = 13.sp,
+                                                        color = DaylightColors.InkSubtle,
+                                                        maxLines = 2,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
 
                                                 Spacer(modifier = Modifier.height(8.dp))
 
@@ -244,36 +261,25 @@ class ProcessPasteActivity : ComponentActivity() {
                                                     horizontalArrangement = Arrangement.SpaceBetween,
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
+                                                    val metaLabel = if (clip.isImage) {
+                                                        clip.summary ?: "Image · ${clip.sourcePackage}"
+                                                    } else {
+                                                        "${clip.wordCount} words · ${clip.sourcePackage}"
+                                                    }
                                                     Text(
-                                                        text = "${clip.wordCount} words · ${clip.sourcePackage}",
+                                                        text = metaLabel,
                                                         fontFamily = DaylightFontFamilies.RomExtendedLight,
                                                         fontSize = 10.sp,
                                                         color = DaylightColors.TextMuted,
                                                         letterSpacing = 0.8.sp
                                                     )
 
-                                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                        OutlinedButton(
-                                                            onClick = {
-                                                                val plain = MarkdownTranspiler.stripFormatting(clip.markdownContent)
-                                                                onClipSelected(plain, isReadOnly, clip)
-                                                            },
-                                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = DaylightColors.InkBlack),
-                                                            shape = RoundedCornerShape(6.dp),
-                                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                                            modifier = Modifier.height(28.dp)
-                                                        ) {
-                                                            Text(
-                                                                text = "PLAIN",
-                                                                fontFamily = DaylightFontFamilies.RomExtendedLight,
-                                                                fontSize = 9.sp,
-                                                                letterSpacing = 0.8.sp
-                                                            )
-                                                        }
-
+                                                    if (clip.isImage) {
                                                         Button(
                                                             onClick = {
-                                                                onClipSelected(clip.markdownContent, isReadOnly, clip)
+                                                                DaylightPasteManager.copyImageToClipboard(this@ProcessPasteActivity, clip)
+                                                                android.widget.Toast.makeText(this@ProcessPasteActivity, "✓ Copied Image to Clipboard", android.widget.Toast.LENGTH_SHORT).show()
+                                                                finish()
                                                             },
                                                             colors = ButtonDefaults.buttonColors(
                                                                 containerColor = DaylightColors.Amber595nm,
@@ -284,12 +290,53 @@ class ProcessPasteActivity : ComponentActivity() {
                                                             modifier = Modifier.height(28.dp)
                                                         ) {
                                                             Text(
-                                                                text = "MARKDOWN",
+                                                                text = "COPY IMAGE",
                                                                 fontFamily = DaylightFontFamilies.RomExtendedLight,
                                                                 fontSize = 9.sp,
                                                                 fontWeight = FontWeight.Bold,
                                                                 letterSpacing = 0.8.sp
                                                             )
+                                                        }
+                                                    } else {
+                                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                            OutlinedButton(
+                                                                onClick = {
+                                                                    val plain = MarkdownTranspiler.stripFormatting(clip.markdownContent)
+                                                                    onClipSelected(plain, isReadOnly, clip)
+                                                                },
+                                                                colors = ButtonDefaults.outlinedButtonColors(contentColor = DaylightColors.InkBlack),
+                                                                shape = RoundedCornerShape(6.dp),
+                                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                                modifier = Modifier.height(28.dp)
+                                                            ) {
+                                                                Text(
+                                                                    text = "PLAIN",
+                                                                    fontFamily = DaylightFontFamilies.RomExtendedLight,
+                                                                    fontSize = 9.sp,
+                                                                    letterSpacing = 0.8.sp
+                                                                )
+                                                            }
+
+                                                            Button(
+                                                                onClick = {
+                                                                    onClipSelected(clip.markdownContent, isReadOnly, clip)
+                                                                },
+                                                                colors = ButtonDefaults.buttonColors(
+                                                                    containerColor = DaylightColors.Amber595nm,
+                                                                    contentColor = androidx.compose.ui.graphics.Color.White
+                                                                ),
+                                                                shape = RoundedCornerShape(6.dp),
+                                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                                modifier = Modifier.height(28.dp)
+                                                            ) {
+                                                                Text(
+                                                                    text = "MARKDOWN",
+                                                                    fontFamily = DaylightFontFamilies.RomExtendedLight,
+                                                                    fontSize = 9.sp,
+                                                                    fontWeight = FontWeight.Bold,
+                                                                    letterSpacing = 0.8.sp
+                                                                )
+                                                            }
                                                         }
                                                     }
                                                 }

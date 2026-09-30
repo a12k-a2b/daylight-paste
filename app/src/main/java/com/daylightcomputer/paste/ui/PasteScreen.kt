@@ -48,6 +48,7 @@ import com.daylightcomputer.paste.data.ClipDatabase
 import com.daylightcomputer.paste.data.DaylightClip
 import com.daylightcomputer.paste.service.DaylightPasteManager
 import com.daylightcomputer.paste.ui.components.ClipCard
+import com.daylightcomputer.paste.ui.components.ImagePreviewDialog
 import com.daylightcomputer.paste.ui.components.PinboardTabs
 import com.daylightcomputer.paste.ui.components.ReaderDialog
 import com.daylightcomputer.paste.ui.components.SearchBar
@@ -216,11 +217,15 @@ fun PasteScreen() {
                                 clip = clip,
                                 onCopyMarkdown = {
                                     DaylightPasteManager.copyAsMarkdown(context, clip)
-                                    confirmationMessage = "✓ Copied Clean Markdown to Clipboard"
+                                    confirmationMessage = "Copied Clean Markdown to Clipboard"
                                 },
                                 onCopyPlain = {
                                     DaylightPasteManager.copyAsPlainText(context, clip)
-                                    confirmationMessage = "✓ Copied Plain Text to Clipboard"
+                                    confirmationMessage = "Copied Plain Text to Clipboard"
+                                },
+                                onCopyImage = {
+                                    DaylightPasteManager.copyImageToClipboard(context, clip)
+                                    confirmationMessage = "Copied Image to Clipboard"
                                 },
                                 onTogglePin = {
                                     scope.launch(Dispatchers.IO) {
@@ -279,20 +284,31 @@ fun PasteScreen() {
                 }
             }
 
-            // Reader Modal
+            // Reader / Image Preview Modal
             activeReaderClip?.let { clip ->
-                ReaderDialog(
-                    clip = clip,
-                    onDismiss = { activeReaderClip = null },
-                    onCopyMarkdown = {
-                        DaylightPasteManager.copyAsMarkdown(context, clip)
-                        confirmationMessage = "✓ Copied Clean Markdown to Clipboard"
-                    },
-                    onCopyPlain = {
-                        DaylightPasteManager.copyAsPlainText(context, clip)
-                        confirmationMessage = "✓ Copied Plain Text to Clipboard"
-                    }
-                )
+                if (clip.isImage) {
+                    ImagePreviewDialog(
+                        clip = clip,
+                        onDismiss = { activeReaderClip = null },
+                        onCopyImage = {
+                            DaylightPasteManager.copyImageToClipboard(context, clip)
+                            confirmationMessage = "Copied Image to Clipboard"
+                        }
+                    )
+                } else {
+                    ReaderDialog(
+                        clip = clip,
+                        onDismiss = { activeReaderClip = null },
+                        onCopyMarkdown = {
+                            DaylightPasteManager.copyAsMarkdown(context, clip)
+                            confirmationMessage = "Copied Clean Markdown to Clipboard"
+                        },
+                        onCopyPlain = {
+                            DaylightPasteManager.copyAsPlainText(context, clip)
+                            confirmationMessage = "Copied Plain Text to Clipboard"
+                        }
+                    )
+                }
             }
         }
     }

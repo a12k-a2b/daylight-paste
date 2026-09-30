@@ -29,7 +29,9 @@ fun PinboardTabs(
 ) {
     val filters = listOf(
         "ALL" to "ALL",
+        "THINGS_PILE" to "📌 THINGS PILE",
         "PINNED" to "⭐ PINNED",
+        "IMAGES" to "🖼️ IMAGES",
         "AI_NOTES" to "🤖 AI & WRITING",
         "MARKDOWN" to "📝 MARKDOWN",
         "CODE" to "💻 CODE",

@@ -5,9 +5,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -16,6 +19,9 @@ import com.daylightcomputer.paste.data.ClipDatabase
 import com.daylightcomputer.paste.data.DaylightClip
 import com.daylightcomputer.paste.markdown.ClipType
 import com.daylightcomputer.paste.markdown.MarkdownTranspiler
+import java.io.File
+import java.io.FileOutputStream
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -66,6 +72,13 @@ class ClipboardWatcherService : Service() {
                 if (clip.itemCount == 0) return@launch
 
                 val item = clip.getItemAt(0) ?: return@launch
+
+                // Detect if clip contains an image
+                if (isImageClip(clip.description, item)) {
+                    handleImageClip(item, clip.description)
+                    return@launch
+                }
+
                 val rawText = item.text?.toString() ?: item.coerceToText(this@ClipboardWatcherService)?.toString() ?: ""
                 val htmlText = item.htmlText
 
@@ -121,6 +134,127 @@ class ClipboardWatcherService : Service() {
             } catch (e: Exception) {
                 e.printStackTrace()
             }
+        }
+    }
+
+    private fun isImageClip(desc: ClipDescription?, item: ClipData.Item): Boolean {
+        if (desc != null) {
+            if (desc.hasMimeType("image/*") ||
+                desc.hasMimeType("image/png") ||
+                desc.hasMimeType("image/jpeg") ||
+                desc.hasMimeType("image/webp") ||
+                desc.hasMimeType("image/gif")
+            ) {
+                return true
+            }
+        }
+        val uri = item.uri ?: return false
+        val scheme = uri.scheme?.lowercase()
+        if (scheme == "content") {
+            try {
+                val type = contentResolver.getType(uri)
+                if (type?.startsWith("image/") == true) return true
+            } catch (ignored: Exception) {}
+        }
+        val path = uri.path?.lowercase() ?: ""
+        return path.endsWith(".png") || path.endsWith(".jpg") || path.endsWith(".jpeg") || path.endsWith(".webp")
+    }
+
+    private fun handleImageClip(item: ClipData.Item, desc: ClipDescription?) {
+        val uri = item.uri ?: return
+        val uriStr = uri.toString()
+
+        // Prevent self-capture loops
+        if (DaylightPasteManager.isRecentInternalCopy(uriStr) ||
+            uriStr.contains("com.daylightcomputer.paste.provider")
+        ) {
+            return
+        }
+
+        try {
+            val imagesDir = File(filesDir, "clips/images")
+            if (!imagesDir.exists()) {
+                imagesDir.mkdirs()
+            }
+
+            val filename = "${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(8)}.png"
+            val destFile = File(imagesDir, filename)
+
+            contentResolver.openInputStream(uri)?.use { input ->
+                FileOutputStream(destFile).use { output ->
+                    input.copyTo(output)
+                }
+            } ?: return
+
+            if (!destFile.exists() || destFile.length() == 0L) {
+                destFile.delete()
+                return
+            }
+
+            // Decode image dimensions without loading entire bitmap into RAM
+            val boundsOptions = BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+            BitmapFactory.decodeFile(destFile.absolutePath, boundsOptions)
+            val width = boundsOptions.outWidth
+            val height = boundsOptions.outHeight
+            val fileSize = destFile.length()
+            val formattedSize = formatFileSize(fileSize)
+            val metadataSummary = if (width > 0 && height > 0) {
+                "$width × $height • $formattedSize"
+            } else {
+                formattedSize
+            }
+
+            val rawLabel = desc?.label?.toString()?.takeIf { it.isNotBlank() }
+            val title = when {
+                !rawLabel.isNullOrBlank() -> rawLabel
+                width > 0 && height > 0 -> "Image (${width}×${height})"
+                else -> "Captured Image"
+            }
+
+            var sourcePackage = "System"
+            try {
+                val method = clipboardManager?.javaClass?.getMethod("getPrimaryClipSource")
+                val src = method?.invoke(clipboardManager) as? String
+                if (!src.isNullOrBlank()) {
+                    sourcePackage = src
+                }
+            } catch (ignored: Exception) {}
+
+            val localUri = "file://${destFile.absolutePath}"
+            val daylightClip = DaylightClip(
+                textContent = "[Image: $metadataSummary]",
+                markdownContent = "![$title]($localUri)",
+                imageUri = localUri,
+                summary = metadataSummary,
+                title = title,
+                clipType = ClipType.IMAGE,
+                charCount = 0,
+                wordCount = 0,
+                sourcePackage = sourcePackage,
+                isPinned = false,
+                pinboard = "IMAGES",
+                createdAt = System.currentTimeMillis()
+            )
+
+            database.insertClip(daylightClip)
+
+            val isInternal = (sourcePackage == packageName) ||
+                    DaylightPasteManager.isRecentInternalCopy(localUri)
+            if (!isInternal) {
+                clipboardHud?.show(daylightClip)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun formatFileSize(bytes: Long): String {
+        return when {
+            bytes < 1024 -> "$bytes B"
+            bytes < 1024 * 1024 -> String.format(java.util.Locale.US, "%.1f KB", bytes / 1024.0)
+            else -> String.format(java.util.Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
         }
     }
 

@@ -42,19 +42,35 @@ import java.net.URLEncoder
  */
 class DaylightSearchBubbleActivity : ComponentActivity() {
 
+    private val queryState = mutableStateOf("")
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Extract query from WEB_SEARCH or PROCESS_TEXT
         val query = extractQuery(intent)
         if (query.isBlank()) {
             finish()
             return
         }
+        queryState.value = query
+        initContent()
+    }
 
-        val searchUrl = "https://html.duckduckgo.com/html/?q=${URLEncoder.encode(query, "UTF-8")}"
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val query = extractQuery(intent)
+        if (query.isNotBlank()) {
+            queryState.value = query
+        }
+    }
 
+    private fun initContent() {
         setContent {
+            val currentQuery by queryState
+            val searchUrl = remember(currentQuery) {
+                "https://lite.duckduckgo.com/lite/?q=${URLEncoder.encode(currentQuery, "UTF-8")}"
+            }
             Dialog(
                 onDismissRequest = { finish() },
                 properties = DialogProperties(
@@ -106,7 +122,7 @@ class DaylightSearchBubbleActivity : ComponentActivity() {
                                     )
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
-                                        text = query,
+                                        text = currentQuery,
                                         fontFamily = DaylightFontFamilies.ArizonaMix,
                                         fontSize = 17.sp,
                                         fontWeight = FontWeight.Bold,
@@ -125,7 +141,7 @@ class DaylightSearchBubbleActivity : ComponentActivity() {
                                 }
                             }
 
-                            Divider(color = DaylightColors.BorderStrong, thickness = 1.dp)
+                            HorizontalDivider(color = DaylightColors.BorderStrong, thickness = 1.dp)
 
                             // Embedded WebView with high-contrast e-paper search
                             AndroidView(
@@ -159,6 +175,11 @@ class DaylightSearchBubbleActivity : ComponentActivity() {
                                             }
                                         }
                                         loadUrl(searchUrl)
+                                    }
+                                },
+                                update = { webView ->
+                                    if (webView.url != searchUrl) {
+                                        webView.loadUrl(searchUrl)
                                     }
                                 }
                             )

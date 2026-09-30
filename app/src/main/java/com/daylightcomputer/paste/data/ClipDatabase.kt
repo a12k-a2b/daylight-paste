@@ -89,13 +89,17 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
         val db = writableDatabase
         // Prevent duplicate consecutive clips
         val latest = getLatestClip()
-        if (latest != null && latest.textContent == clip.textContent) {
-            // Touch timestamp
-            val values = ContentValues().apply {
-                put(COL_CREATED_AT, System.currentTimeMillis())
+        if (latest != null) {
+            val isSameText = clip.textContent.isNotBlank() && latest.textContent == clip.textContent && clip.clipType != ClipType.IMAGE
+            val isSameImage = !clip.imageUri.isNullOrBlank() && latest.imageUri == clip.imageUri
+            if (isSameText || isSameImage) {
+                // Touch timestamp
+                val values = ContentValues().apply {
+                    put(COL_CREATED_AT, System.currentTimeMillis())
+                }
+                db.update(TABLE_CLIPS, values, "$COL_ID = ?", arrayOf(latest.id.toString()))
+                return latest.id
             }
-            db.update(TABLE_CLIPS, values, "$COL_ID = ?", arrayOf(latest.id.toString()))
-            return latest.id
         }
 
         val values = ContentValues().apply {
@@ -164,8 +168,9 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
         }
 
         if (searchQuery.isNotBlank()) {
-            clauses.add("($COL_TEXT_CONTENT LIKE ? OR $COL_TITLE LIKE ? OR $COL_SOURCE_PACKAGE LIKE ?)")
+            clauses.add("($COL_TEXT_CONTENT LIKE ? OR $COL_TITLE LIKE ? OR $COL_SOURCE_PACKAGE LIKE ? OR ($COL_SUMMARY IS NOT NULL AND $COL_SUMMARY LIKE ?))")
             val param = "%$searchQuery%"
+            args.add(param)
             args.add(param)
             args.add(param)
             args.add(param)

@@ -16,33 +16,45 @@ Optimized for the custom 10.5" 1200×1600 @ 200 DPI **LivePaper transflective re
 - **The Android Issue**: iOS AI apps place raw Markdown directly into `public.utf8-plain-text`, allowing Day One on iOS to render full Markdown syntax. Android AI apps place rich text into `text/html` and plain text into `text/plain` via DOM `innerText`, which completely strips `#` headings, `**bold**`, `*italics*`, lists, and code backticks. Day One on Android reads `text/plain` and receives unstyled flat text.
 - **The Daylight Paste Solution**: Built-in `MarkdownTranspiler` intercepts clipboard updates in real time, converts HTML fragments into clean GitHub Flavored Markdown / CommonMark syntax, and injects clean Markdown directly into `text/plain` upon copy. Day One and note apps receive 100% intact Markdown formatting.
 
+### 3. Image Clipboard History (Streaming ContentProvider)
+- **The Android Issue**: Copying large uncompressed bitmaps directly trips the 1MB Binder transaction limit immediately, while temporary content URIs from other apps expire or fail with `SecurityException` when shared with note-taking apps.
+- **The Daylight Paste Solution**: `ClipboardWatcherService` captures image streams (`image/png`, `image/jpeg`, `image/webp`) into private app storage (`clips/images/`). Images are served through an exported streaming `DaylightPasteContentProvider` returning `ParcelFileDescriptor.open(file, MODE_READ_ONLY)`. Other apps stream image data directly through Linux kernel pipes with zero Binder memory footprint.
+
 ---
 
 ## Features
 
 ### 1. Tactile Stationery Pinboard Cards
 - Clippings are rendered as physical stationery cards on LivePaper canvas (`#FAF8F5`) with ink black (`#111111`) and cream surfaces (`#EAE5DC`).
-- Content-type badges: `MARKDOWN`, `PLAIN`, `CODE`, `LINK`, `AI & WRITING`.
-- Metadata at a glance: character count, word count, relative timestamp, and source application package.
+- Content-type badges: `MARKDOWN`, `PLAIN`, `CODE`, `LINK`, `AI & WRITING`, `IMAGE`.
+- Metadata at a glance: character count, word count, image dimensions & file size, relative timestamp, and source application package.
 
-### 2. Instant Sub-Millisecond Search
+### 2. Image Clipping Support
+- High-contrast visual thumbnails on `#FAF8F5` paper canvas with `#111111` 1.5dp borders.
+- Dedicated `🖼️ IMAGES` pinboard tab for browsing screenshots and copied artwork.
+- One-tap `COPY IMAGE` button placing streaming `content://` URIs with URI read permissions onto the system clipboard.
+- Full-screen distraction-free `ImagePreviewDialog` modal for inspecting high-res diagrams and screenshots.
+
+### 3. Instant Sub-Millisecond Search
 - Real-time full-text search across all stored clipping content, titles, URLs, and source packages with zero typing latency.
 
-### 3. Smart Pinboard Categories
+### 4. Smart Pinboard Categories
 - Organized into dedicated filters:
   - `ALL`: Complete clipboard history.
   - `⭐ PINNED`: Pinned essential snippets that never get pruned.
+  - `🖼️ IMAGES`: Image clippings, screenshots, and diagrams.
   - `🤖 AI & WRITING`: AI prompts, LLM generations, essays, and journals.
   - `📝 MARKDOWN`: Documents containing formatted Markdown syntax.
   - `💻 CODE`: Source code snippets rendered in `Iosevka` monospace.
   - `🔗 LINKS`: Extracted web URLs.
 
-### 4. Dual-Action Formatting
+### 5. Multi-Action Formatting
 - **"COPY MARKDOWN"**: Formats and places clean Markdown into clipboard for Day One, Obsidian, Logseq, and Notion.
 - **"PLAIN"**: Strips formatting for clean terminal, code editor, or raw text entry.
+- **"COPY IMAGE"**: Streams full-resolution images to drawing and journal apps without Binder limits.
 
-### 5. Distraction-Free Long-Form Reader Modal
-- Tapping the reader icon on any card opens the entire text in a full-screen book layout typeset in `EB Garamond`, perfect for long AI essays on the glare-free LivePaper display.
+### 6. Distraction-Free Long-Form Reader Modal
+- Tapping the reader icon on any text card opens the entire text in a full-screen book layout typeset in `EB Garamond`.
 
 ---
 
@@ -55,7 +67,10 @@ Optimized for the custom 10.5" 1200×1600 @ 200 DPI **LivePaper transflective re
 | **3. Instant Search Filtering** | <img src="screenshots/03_instant_search_filtering.png" width="360" alt="Search Filtering"> | **Sub-Millisecond Search**: Real-time full-text search filtering across history (e.g. searching "gradient" isolates matching code and journal entries instantly). Includes quick-clear action. |
 | **4. Smart Pinboard Categories** | <img src="screenshots/04_code_tab_iosevka.png" width="360" alt="Code Pinboard"> | **Category Organization**: Filtering by content type. The `💻 CODE` filter displays snippets formatted in `Iosevka` monospace with indentation preservation. |
 | **5. Tactile Amber Confirmation** | <img src="screenshots/05_amber_toast_confirmation.png" width="360" alt="Amber Confirmation"> | **Visual Feedback**: Ambient 595nm amber confirmation pill (`✓ Copied Clean Markdown to Clipboard`) verifying safe injection of Markdown into the Android clipboard. |
-| **6. Empty Clipboard State** | <img src="screenshots/06_empty_state.png" width="360" alt="Empty State"> | **Clean Minimal Baseline**: Zero-clutter empty state shown on first run or when history is cleared, providing clear cues on how to capture text. |
+| **6. Image Clip Cards** | <img src="screenshots/14_image_clip_thumbnail.png" width="360" alt="Image Clip Cards"> | **Visual Image Cards**: High-contrast thumbnails on `#FAF8F5` paper canvas with `#111111` 1.5dp borders, dimensions & file size badges, and solid amber `COPY IMAGE` action. |
+| **7. Images Pinboard Filter** | <img src="screenshots/15_images_tab_filtered.png" width="360" alt="Images Pinboard Filter"> | **Dedicated Images Tab**: `🖼️ IMAGES` filter isolating screenshots and imported images for fast browsing on the LivePaper display. |
+| **8. Fullscreen Image Preview** | <img src="screenshots/16_image_fullscreen_preview.png" width="360" alt="Fullscreen Image Preview"> | **Full-Screen LivePaper Modal**: Full-fidelity image modal with `#FAF8F5` surface, 2dp border, image dimensions, and quick copy action. |
+| **9. Image Copied Toast** | <img src="screenshots/17_image_copied_toast.png" width="360" alt="Image Copied Toast"> | **Tactile Feedback**: 595nm amber pill confirmation (`✓ Copied Image to Clipboard`) when streaming content URI is placed onto clipboard. |
 
 ---
 
@@ -87,7 +102,9 @@ DaylightPaste/
 │       │   │   ├── DaylightPasteApp.kt
 │       │   │   ├── data/
 │       │   │   │   ├── ClipDatabase.kt
-│       │   │   │   └── DaylightClip.kt
+│       │   │   │   ├── ClipStreamProvider.kt
+│       │   │   │   ├── DaylightClip.kt
+│       │   │   │   └── DaylightPasteContentProvider.kt
 │       │   │   ├── markdown/
 │       │   │   │   └── MarkdownTranspiler.kt
 │       │   │   ├── service/
@@ -99,8 +116,11 @@ DaylightPaste/
 │       │   │   ├── ui/
 │       │   │   │   ├── MainActivity.kt
 │       │   │   │   ├── PasteScreen.kt
+│       │   │   │   ├── ProcessCopyActivity.kt
+│       │   │   │   ├── ProcessPasteActivity.kt
 │       │   │   │   ├── components/
 │       │   │   │   │   ├── ClipCard.kt
+│       │   │   │   │   ├── ImagePreviewDialog.kt
 │       │   │   │   │   ├── PinboardTabs.kt
 │       │   │   │   │   ├── ReaderDialog.kt
 │       │   │   │   │   └── SearchBar.kt
@@ -118,6 +138,7 @@ DaylightPaste/
 │       │       └── values/
 │       └── test/
 │           └── java/com/daylightcomputer/paste/
+│               ├── ImageClipboardTest.kt
 │               ├── MarkdownTranspilerTest.kt
 │               └── UnlimitedSizeTest.kt
 ├── build.gradle.kts

@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_CLIPBOARD_IN_BACKGROUND" />
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:name=".DaylightPasteApp"
@@ -51,6 +52,54 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+
+        <!-- Snip directly into ThingsPile and Daylight Paper's Commonplace Book -->
+        <activity
+            android:name=".ui.ProcessSnipActivity"
+            android:label="Snip"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
+        <!-- Flinx-Style Floating Link Bubble & Non-Blocking Search -->
+        <activity
+            android:name=".ui.DaylightSearchBubbleActivity"
+            android:label="Search"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:launchMode="singleTop"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.WEB_SEARCH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".ui.DaylightTextSelectionShowcaseActivity"
+            android:label="Selection &amp; Caliper Test"
+            android:theme="@style/Theme.Daylight.Paste"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+            </intent-filter>
+        </activity>
+
+        <!-- Unlimited Clipboard Streaming Provider for Text & Images -->
+        <provider
+            android:name=".data.DaylightPasteContentProvider"
+            android:authorities="com.daylightcomputer.paste.provider"
+            android:exported="true"
+            android:grantUriPermissions="true" />
 
         <service
             android:name=".service.ClipboardWatcherService"

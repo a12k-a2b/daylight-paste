@@ -49,6 +49,12 @@ object DaylightPasteManager {
             // When copying as Markdown, we must put the clean CommonMark text as plain text
             // so rich editors (Day One, Obsidian, Claude, etc.) do NOT paste the original messy HTML.
             val clipData = ClipData.newPlainText(clip.title, safeText)
+            if (clip.id > 0) {
+                try {
+                    val streamUri = com.daylightcomputer.paste.data.ClipStreamProvider.getClipUri(clip.id)
+                    clipData.addItem(ClipData.Item(safeText, null, streamUri))
+                } catch (ignored: Exception) {}
+            }
 
             clipboard.setPrimaryClip(clipData)
             true
@@ -77,14 +83,45 @@ object DaylightPasteManager {
     }
 
     /**
+     * Copies image content URI to system clipboard.
+     * Generates a streaming content:// URI backed by DaylightPasteContentProvider,
+     * allowing Day One, Noteshelf, Chrome, etc. to stream image bytes without hitting Binder limits.
+     */
+    fun copyImageToClipboard(context: Context, clip: DaylightClip): Boolean {
+        return try {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val contentUri = com.daylightcomputer.paste.data.DaylightPasteContentProvider.getImageContentUri(context, clip)
+                ?: return false
+
+            markInternalCopy(contentUri.toString())
+            if (!clip.imageUri.isNullOrBlank()) {
+                markInternalCopy(clip.imageUri)
+            }
+
+            val clipData = ClipData.newUri(context.contentResolver, clip.title, contentUri)
+            clipboard.setPrimaryClip(clipData)
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    /**
      * Automatically injects paste (KEYCODE_PASTE / Ctrl+V) into active focused app window.
      */
     suspend fun injectPasteAction(context: Context, clip: DaylightClip, asMarkdown: Boolean = true) {
         withContext(Dispatchers.IO) {
-            if (asMarkdown) {
-                copyAsMarkdown(context, clip)
-            } else {
-                copyAsPlainText(context, clip)
+            when {
+                clip.clipType == com.daylightcomputer.paste.markdown.ClipType.IMAGE || !clip.imageUri.isNullOrBlank() -> {
+                    copyImageToClipboard(context, clip)
+                }
+                asMarkdown -> {
+                    copyAsMarkdown(context, clip)
+                }
+                else -> {
+                    copyAsPlainText(context, clip)
+                }
             }
             try {
                 // Execute keyevent paste via shell/root for zero-friction paste into Day One / notes
@@ -93,3 +130,4 @@ object DaylightPasteManager {
         }
     }
 }
+
