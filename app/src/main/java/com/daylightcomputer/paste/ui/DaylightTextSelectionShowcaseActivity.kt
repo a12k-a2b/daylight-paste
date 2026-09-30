@@ -233,6 +233,52 @@ Click 'Snip' in the floating menu to archive this insight directly to ThingsPile
                 0,
                 1.0f
             )
+
+            customSelectionActionModeCallback = object : ActionMode.Callback2() {
+                override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean {
+                    // Inject Snip as first action
+                    menu?.add(Menu.NONE, 1001, 1, "Snip")?.apply {
+                        setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+                    }
+                    // Inject Search as second action
+                    menu?.add(Menu.NONE, 1002, 2, "Search")?.apply {
+                        setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+                    }
+                    return true
+                }
+
+                override fun onPrepareActionMode(mode: ActionMode?, menu: Menu?): Boolean = false
+
+                override fun onActionItemClicked(mode: ActionMode?, item: MenuItem?): Boolean {
+                    val selStart = selectionStart
+                    val selEnd = selectionEnd
+                    val selected = if (selStart in 0..selEnd) {
+                        text.subSequence(selStart, selEnd).toString()
+                    } else ""
+
+                    when (item?.itemId) {
+                        1001 -> {
+                            val intent = Intent(this@DaylightTextSelectionShowcaseActivity, ProcessSnipActivity::class.java).apply {
+                                putExtra(Intent.EXTRA_PROCESS_TEXT, selected)
+                            }
+                            startActivity(intent)
+                            mode?.finish()
+                            return true
+                        }
+                        1002 -> {
+                            val intent = Intent(this@DaylightTextSelectionShowcaseActivity, DaylightSearchBubbleActivity::class.java).apply {
+                                putExtra(Intent.EXTRA_PROCESS_TEXT, selected)
+                            }
+                            startActivity(intent)
+                            mode?.finish()
+                            return true
+                        }
+                    }
+                    return false
+                }
+
+                override fun onDestroyActionMode(mode: ActionMode?) {}
+            }
         }
 
         // Attach Multi-Tap Selection Listener
@@ -301,6 +347,7 @@ Click 'Snip' in the floating menu to archive this insight directly to ThingsPile
         }
         if (start < end) {
             editor.setSelection(start, end)
+            editor.post { editor.performLongClick() }
         }
     }
 
@@ -327,6 +374,7 @@ Click 'Snip' in the floating menu to archive this insight directly to ThingsPile
 
         if (start < end) {
             editor.setSelection(start, end)
+            editor.post { editor.performLongClick() }
         }
     }
 
@@ -344,6 +392,7 @@ Click 'Snip' in the floating menu to archive this insight directly to ThingsPile
 
         if (start < end) {
             editor.setSelection(start, end)
+            editor.post { editor.performLongClick() }
         }
     }
 
