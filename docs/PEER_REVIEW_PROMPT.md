@@ -8,7 +8,7 @@
 - **Project Name**: Daylight Paste (`com.daylightcomputer.paste`)
 - **Target Device**: Daylight Computer DC-1 (10.5" LivePaper transflective reflective LCD, MediaTek Helio G99, Android 13 / SolOS)
 - **Private GitHub Repository**: `https://github.com/a12k-a2b/daylight-paste` (Branch: `main`)
-- **Primary Purpose**: Eradicate Android's clipboard character truncation and Markdown formatting loss, bringing iOS-grade infinite-length rich clipboard handling to SolOS with a macOS **Paste** (pasteapp.io) tactile stationery interface, complete image clipboard history with streaming ContentProviders (Pass 2), followed by fast semantic AI search (Pass 3).
+- **Primary Purpose**: Eradicate Android's clipboard character truncation and Markdown formatting loss, bringing iOS-grade infinite-length rich clipboard handling to SolOS with a macOS **Paste** (pasteapp.io) tactile stationery interface, complete image clipboard history with streaming ContentProviders (Pass 2), and on-device + fast cloud semantic AI search (Pass 3).
 
 ---
 
@@ -47,7 +47,7 @@
 2. **The Daylight Paste Streaming Architecture**:
    - Daylight Paste captures all copied image streams immediately into private app storage (`context.filesDir/clips/images/{timestamp}_{uuid}.png`).
    - Images are served through an exported `DaylightPasteContentProvider` (`content://com.daylightcomputer.paste.provider/images/...`) that overrides `openFile()` to return a `ParcelFileDescriptor.open(file, MODE_READ_ONLY)`.
-   - This bypasses the Binder IPC payload cap completely: the receiving app reads the Linux file descriptor directly through kernel pipe streaming without memory duplication.
+   - Bypasses the Binder IPC payload cap completely: the receiving app reads the Linux file descriptor directly through kernel pipe streaming without memory duplication.
 
 ---
 
@@ -76,7 +76,7 @@ The app is engineered specifically for the Daylight DC-1 hardware:
 
 ---
 
-## 4. Current Architecture & Implementation Status (Pass 1 + Pass 2 Completed)
+## 4. Current Architecture & Implementation Status (All 3 Passes Completed)
 
 ```
 DaylightPaste/
@@ -87,13 +87,19 @@ DaylightPaste/
 │       │   ├── AndroidManifest.xml
 │       │   ├── java/com/daylightcomputer/paste/
 │       │   │   ├── DaylightPasteApp.kt
+│       │   │   ├── ai/
+│       │   │   │   ├── FastAiProvider.kt               # Inco GLM 5.3 Flash (~600 TPS), Mercury 2.5, JEV
+│       │   │   │   ├── LocalSemanticEngine.kt          # On-device dense 128D projection + stemming (<2ms)
+│       │   │   │   ├── SemanticSearchEngine.kt         # ScoredClip models & provider interface
+│       │   │   │   ├── SemanticSearchManager.kt        # Hybrid search orchestrator & background vectorizer
+│       │   │   │   └── VectorUtils.kt                  # SIMD-style cosine similarity & Little-Endian serialization
 │       │   │   ├── data/
-│       │   │   │   ├── ClipDatabase.kt                 # SQLite WAL infinite-size store + FTS + image metadata
-│       │   │   │   ├── DaylightClip.kt                 # Core data model (text + image dimensions & file size)
+│       │   │   │   ├── ClipDatabase.kt                 # SQLite WAL store + vector embeddings + image metadata
+│       │   │   │   ├── DaylightClip.kt                 # Core model (text + image metadata + embedding blob)
 │       │   │   │   ├── DaylightPasteContentProvider.kt # Streaming PFD openFile() provider
 │       │   │   │   └── ClipStreamProvider.kt           # Backward-compatibility alias
 │       │   │   ├── markdown/
-│       │   │   │   ├── ClipType.kt                     # Content classification enum (includes IMAGE)
+│       │   │   │   ├── ClipType.kt                     # Classification enum (TEXT, MARKDOWN, CODE, URL, IMAGE)
 │       │   │   │   └── MarkdownTranspiler.kt           # HTML -> CommonMark/GFM + Clean AI mode
 │       │   │   ├── service/
 │       │   │   │   ├── BootReceiver.kt                 # Auto-starts service on boot
@@ -104,15 +110,15 @@ DaylightPaste/
 │       │   │   │   └── OverlayPasteService.kt          # WindowManager floating edge handle
 │       │   │   ├── ui/
 │       │   │   │   ├── MainActivity.kt                 # Full SolOS Compose interface
-│       │   │   │   ├── PasteScreen.kt                  # Card carousel, search, pinboard filters, modals
+│       │   │   │   ├── PasteScreen.kt                  # Card carousel, semantic search, pinboards, modals
 │       │   │   │   ├── ProcessCopyActivity.kt          # PROCESS_TEXT "Daylight Copy"
 │       │   │   │   ├── ProcessPasteActivity.kt         # PROCESS_TEXT "Daylight Paste" (text + images)
 │       │   │   │   ├── components/
-│       │   │   │   │   ├── ClipCard.kt                 # Stationery card with image thumbnail & copy actions
+│       │   │   │   │   ├── ClipCard.kt                 # Stationery card with thumbnail & score badge
 │       │   │   │   │   ├── ImagePreviewDialog.kt       # Full-screen SolOS LivePaper image preview modal
 │       │   │   │   │   ├── PinboardTabs.kt             # ALL, PINNED, IMAGES, AI, MARKDOWN, CODE, LINKS
 │       │   │   │   │   ├── ReaderDialog.kt             # Distraction-free EB Garamond reader
-│       │   │   │   │   └── SearchBar.kt                # Sub-millisecond instant search bar
+│       │   │   │   │   └── SearchBar.kt                # Tactile LivePaper SearchBar with ✨ AI toggle pill
 │       │   │   │   └── theme/
 │       │   │   │       ├── DaylightColor.kt            # SolOS color palette
 │       │   │   │       └── DaylightTypography.kt       # SolOS font families
@@ -121,10 +127,15 @@ DaylightPaste/
 │       │   │       └── values/                         # Strings, styles, themes
 │       │   └── test/
 │       │       └── java/com/daylightcomputer/paste/
+│       │           ├── SemanticSearchTest.kt           # 4/4 Cosine similarity, vector serialization & ranking
 │       │           ├── ImageClipboardTest.kt           # 5/5 Image model, ContentProvider & MIME tests
 │       │           ├── MarkdownTranspilerTest.kt       # 10/10 transpilation unit tests
 │       │           └── UnlimitedSizeTest.kt            # 100k char SQLite benchmark
-│       └── screenshots/                                # 17 full-fidelity verified device screenshots
+│       └── screenshots/                                # 21 full-fidelity verified device screenshots
+│           ├── 18_pass3_main_ai_search.png             # Pass 3 main UI with ✨ AI SEMANTIC toggle
+│           ├── 19_pass3_ai_search_query.png            # Live semantic query with match score badges
+│           ├── 20_pass3_ai_search_results_clean.png    # High-contrast results list
+│           └── 21_pass3_toggled_keyword_mode.png       # Toggled to 🔍 KEYWORD exact search mode
 ├── daylight_tools/
 │   ├── device_lock.py                                  # Concurrency lease coordinator
 │   └── setup_system_clipboard.sh                       # Turnkey OS replacement configuration
@@ -135,115 +146,49 @@ DaylightPaste/
 
 ### Key Technical Mechanisms Implemented:
 
-#### 1. Image Clipboard Interception & Persistence (`ClipboardWatcherService.kt`)
-- Detects `image/*` MIME types (`image/png`, `image/jpeg`, `image/webp`, `image/gif`) and `content://` image URIs in `onPrimaryClipChanged`.
-- Uses a self-copy guard (`source != "com.daylightcomputer.paste"`) to prevent infinite recursion when Daylight Paste sets the clipboard.
-- Streams bytes directly to internal app storage (`context.filesDir/clips/images/{timestamp}_{uuid}.png`).
-- Decodes image dimensions efficiently using `BitmapFactory.Options.inJustDecodeBounds = true` (zero bitmap heap allocation during capture).
-- Formats image metadata (e.g. `1184 × 1584 • 837.7 KB`) and saves to SQLite `daylight_paste.db` with `clip_type = 'IMAGE'`.
+#### 1. Pass 1: Text Clipboard Hardening & Markdown Transpilation
+- **SQLite WAL Infinite Storage**: Backed by `SQLiteOpenHelper` with Write-Ahead Logging enabled. 100k-character benchmark verifies instant ingestion without memory spikes.
+- **Markdown Transpiler**: Transpiles complex DOM structures, nested tables, blockquotes, and code fences into CommonMark. Vaults relational operators (`3 < 5`) and array brackets (`arr[0]`) via sentinel tokenization to prevent parser destruction.
+- **OS Replacement & Tooltip Integration**: Registers `PROCESS_TEXT` handlers `"Daylight Copy"` and `"Daylight Paste"`. Disables stock gray Android 13 popup (`device_config put systemui clipboard_overlay_enabled false`) and provides a non-intrusive 2-second ambient SolOS amber HUD.
 
-#### 2. Streaming ContentProvider Bypassing Binder Limits (`DaylightPasteContentProvider.kt`)
-- Authority: `com.daylightcomputer.paste.provider` (`exported="true"`, `grantUriPermissions="true"`).
-- Handles text streaming (`/clips/#`) and image streaming (`/images/*` or `/images/#`).
-- Implements `openFile()`:
-  ```kotlin
-  val file = if (match == CODE_IMAGE_ID) {
-      val clip = database.getClipById(id)
-      File(clip.imageUri)
-  } else {
-      File(imagesDir, filename)
-  }
-  // Strict path traversal validation across internal filesDir and cacheDir
-  if (!file.canonicalPath.startsWith(ctx.filesDir.canonicalPath) && 
-      !file.canonicalPath.startsWith(ctx.cacheDir.canonicalPath)) {
-      throw SecurityException("Access denied: path traversal attempt")
-  }
-  return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-  ```
-- **Bugs Caught & Hardened in Pass 2**:
-  1. **`UriMatcher` Ordering Shadow**: `images/#` was initially registered *after* `images/*`. In Android's `UriMatcher`, wildcards registered before number tokens match numeric segments as generic strings, permanently starving `CODE_IMAGE_ID`. Swapped registration order so `#` takes precedence over `*`.
-  2. **MIME Type Mismatch (`getMimeTypeForPath`)**: Image clips are stored under `/clips/images/{timestamp}_{uuid}.png`. The initial MIME resolver checked `lower.contains("/clips") -> "text/plain"` before the fallthrough `image/png` without an explicit `.png` check. Consequently, all PNG images served by clip ID resolved to `text/plain`! Fixed by explicitly matching `.png`, prioritizing `.png`/`.jpg`/`.webp`/`.gif`/`/images` before `/clips`.
-- **Empirical Verification on Hardware**: An 857,828 byte (1184×1584) screenshot was read via `adb shell content read --uri content://com.daylightcomputer.paste.provider/images/16` and streamed all 857,828 bytes identically without hitting Android's 1MB Binder ceiling. `content gettype --uri content://com.daylightcomputer.paste.provider/images/16` returns `image/png`.
+#### 2. Pass 2: Image Clipboard History & Streaming ContentProvider
+- **Interception**: Detects `image/*` MIME types and `content://` image URIs. Decodes dimensions with `inJustDecodeBounds = true` (zero heap allocation during ingestion) and streams bytes directly into `context.filesDir/clips/images/`.
+- **Zero-Binder Ceiling Streaming (`DaylightPasteContentProvider.kt`)**: Implements `openFile()` returning `ParcelFileDescriptor.open(file, MODE_READ_ONLY)`. Verified by streaming full 857KB (1184×1584) images across process boundaries via direct kernel file descriptor pipes.
+- **Tactile UI**: High-contrast thumbnail rendering with 1.5dp borders, dimensions/size badges, `🖼️ IMAGES` tab filter, and full-screen image preview modal.
 
-#### 3. Image Clipboard Injection (`DaylightPasteManager.kt`)
-- `copyImageToClipboard(context, clip)` generates the canonical streaming content URI: `content://com.daylightcomputer.paste.provider/images/{clipId}`.
-- Wraps the URI in `ClipData.Item(null, null, grantIntent, contentUri)` where `grantIntent` carries `Intent.FLAG_GRANT_READ_URI_PERMISSION`.
-- Explicitly calls `context.grantUriPermission(pkg, contentUri, FLAG_GRANT_READ_URI_PERMISSION)` for SolOS system targets (`com.daylightcomputer.paper`, `com.daylightcomputer.launcher`, `com.android.shell`).
-- Allows target applications (Day One, Noteshelf, Slack, Telegram, Gmail) to stream the raw image file descriptor directly from Daylight Paste.
-
-#### 4. SolOS LivePaper Tactile UI for Images (`ClipCard.kt` & `ImagePreviewDialog.kt`)
-- **`PinboardTabs.kt`**: Added dedicated `🖼️ IMAGES` filter tab (`PinboardTabs.kt`).
-- **`ClipCard.kt`**:
-  - Downsampled thumbnail rendering via `BitmapFactory.Options.inSampleSize` inside `rememberThumbnailBitmap()`.
-  - In-memory `ThumbnailCache` (`android.util.LruCache<String, ImageBitmap>`) eliminates GC pressure and frame drops during 90Hz scrolling on the MediaTek Helio G99.
-  - Displayed on a `#FAF8F5` paper canvas with `#111111` 1.5dp borders.
-  - Metadata badges displaying dimensions and file size (e.g., `1184 × 1584 • 837.7 KB`).
-  - Solid amber `COPY IMAGE` pill button with immediate tactile feedback.
-- **`ImagePreviewDialog.kt`**: Full-screen LivePaper modal with 2dp border, full image rendering, `COPY IMAGE` button, and 595nm amber confirmation toast.
-- **Consecutive Duplicate Image Cleanup (`ClipDatabase.kt`)**: Prevents flash memory exhaustion by identifying consecutive identical image captures, updating timestamps, and pruning redundant disk files.
+#### 3. Pass 3: Semantic AI Search & Fast Inference
+- **Vector Mathematics (`VectorUtils.kt`)**: Implements L2 normalization, dot product, and cosine similarity. Serializes `FloatArray` into Little-Endian `ByteArray` stored in SQLite's `embedding BLOB` column.
+- **On-Device Semantic Projection (`LocalSemanticEngine.kt`)**: 128-dimensional dense feature projection utilizing unigram hashing, character 3-gram hashing, suffix stemming (Porter-style), and concept domain clusters (credentials, networking, cooking, programming, tasks). Operates offline with **<2ms latency** per clip on the Helio G99.
+- **Hybrid Scoring**: Combines 60% semantic cosine similarity with 40% lexical/exact match, surfacing conceptual matches (e.g. searching *"how do I connect to the office internet?"* immediately ranks the WiFi password clip at #1).
+- **Fast Cloud AI Architecture (`FastAiProvider.kt`)**: Drop-in provider interface supporting ultra-fast inference:
+  - **Inco GLM 5.3 Flash** (~600 TPS ultra-low latency inference).
+  - **Mercury 2.5** fast reasoning.
+  - **JEV** edge inference.
+  - Automatically synthesizes direct natural-language answers when the user asks a question (e.g. *"What was the wifi password?"* displays a dedicated `✨ AI ANSWER` card).
+- **LivePaper Ergonomics (`SearchBar.kt`)**: Tactile search bar with an interactive `✨ AI SEMANTIC` / `🔍 KEYWORD` pill toggle, displaying dynamic placeholder text and percentage relevance badges (`✨ 94%`) on each stationery card.
 
 ---
 
-## 5. The 3-Pass Product Roadmap
+## 5. Reviewer Focus Areas & Technical Questions
 
-```mermaid
-flowchart LR
-    subgraph Pass_1 ["Pass 1: Text Hardening (DONE)"]
-        P1_A["Unlimited Size SQLite WAL"]
-        P1_B["HTML -> Markdown Transpiler"]
-        P1_C["Tooltip Menu (PROCESS_TEXT)"]
-        P1_D["SystemUI Overlay Replacement"]
-    end
+As an external expert reviewer, please evaluate the codebase and architecture against the following specific questions:
 
-    subgraph Pass_2 ["Pass 2: Image Clipboard History (DONE)"]
-        P2_A["Intercept image/* & content URIs"]
-        P2_B["Disk Caching + Streaming ContentProvider"]
-        P2_C["LivePaper Thumbnail Cards & Full Preview"]
-        P2_D["Zero-Binder Limit FileDescriptor Streaming"]
-    end
+### 1. Vector Indexing Scaling on Helio G99
+- In `LocalSemanticEngine`, we currently compute cosine similarity over candidate clips in SQLite. For a heavy clipboard user with 10,000+ clips accumulated over a year:
+  - Is flat linear cosine similarity over FloatArrays fast enough on the Helio G99's Cortex-A76 cores, or should we compile `sqlite-vec` / `usearch` as an Android NDK C extension?
+  - What vector quantization strategy (e.g., 1-bit or int8 scalar quantization) provides the best balance of speed, memory, and semantic recall on Android?
 
-    subgraph Pass_3 ["Pass 3: Semantic AI Search & Fast Inference (NEXT)"]
-        P3_A["Vector Embeddings (Jina / ONNX vs Cloud)"]
-        P3_B["Fast Inference: Inco GLM 5.3 Flash / Mercury 2.5"]
-        P3_C["Natural Language Semantic Queries"]
-        P3_D["SQLite Vector Indexing (sqlite-vec)"]
-    end
+### 2. Fast AI Streaming & Context Packing (Inco GLM 5.3 Flash / Mercury 2.5)
+- For question answering over clipboard history:
+  - When the user asks a question, we pass the top 5 relevant clips as prompt context. How should we format this context window to minimize token latency while maximizing synthesis accuracy?
+  - For streaming responses (~600 TPS with Inco GLM 5.3 Flash), what is the optimal Compose state management pattern to prevent recomposition churn on LivePaper's 90Hz refresh cycle?
 
-    Pass_1 --> Pass_2 --> Pass_3
-```
+### 3. ContentProvider Security & Lifetime
+- `DaylightPasteContentProvider` serves images via `openFile()`. When third-party apps (e.g. Day One or Noteshelf) ingest the image URI, what is the best lifecycle strategy for cleaning up older disk files without breaking references in receiving apps that store URIs instead of copying bytes?
 
-- **Pass 1 (Completed)**: Text clipboard hardening, rock-solid Markdown preservation for Day One, zero character limits, seamless OS tooltip replacement, and minimal 2-second amber pill feedback.
-- **Pass 2 (Completed)**: Image capture, disk caching, streaming `DaylightPasteContentProvider` with `ParcelFileDescriptor`, thumbnail rendering, full-screen image preview, and image copying.
-- **Pass 3 (Upcoming — Focus of this Review)**: Enabling natural-language semantic search across all copied history (e.g. searching *"that recipe with ginger"*, *"the screenshot of network settings"*, or *"the error about memory leak"* without exact keyword matching).
+### 4. SolOS & LivePaper Ergonomics
+- The LivePaper display is transflective reflective LCD. In our UI, semantic matches are highlighted with high-contrast amber (`#D97706`) and solid `#111111` borders. Are there specific anti-ghosting or contrast optimizations we should apply during rapid search typing?
 
 ---
 
-## 6. What We Need from You (Reviewer Questions)
-
-As an external expert reviewer, please evaluate the codebase, architecture, and Pass 3 roadmap against the following specific areas:
-
-### 1. Adversarial Review of Pass 2 (Image Clipboard History & ContentProvider)
-- **ContentProvider URI Permissions**: In `DaylightPasteContentProvider`, we set `exported="true"` and `grantUriPermissions="true"`. When an app receives `content://com.daylightcomputer.paste.provider/images/{id}`, does `grantUriPermissions` persist if the target app launches a background worker or saves the URI? Should we provide transient time-limited tokenized URIs or rely on standard AOSP URI permission grants?
-- **Helio G99 Memory & Garbage Collection**: In `ClipCard.kt`, thumbnails are loaded via `rememberThumbnailBitmap(clip.imageUri)`. With 100+ image clips in the carousel, what caching strategy (e.g., Coil/Glide vs. a custom LRU memory cache with `BitmapPool`) is required to guarantee 90Hz scrolling without GC frame drops on the MediaTek Helio G99?
-- **Path Traversal & Security Auditing**: Our `DaylightPasteContentProvider` checks `file.canonicalPath.startsWith(imagesDir.canonicalPath)`. Are there any Android 13 symlink or content URI bypass vulnerabilities that could expose private app storage?
-
-### 2. Architecture for Pass 3: Semantic Search & Ultra-Fast AI
-- **On-Device Embeddings vs. Cloud Inference**:
-  - The Daylight DC-1 uses a MediaTek Helio G99 (2× Cortex-A76 @ 2.2GHz + 6× Cortex-A55 @ 2.0GHz, Mali-G57 MC2, no dedicated high-end NPU).
-  - Can small embedding models like **Jina Embeddings v2/v3 Small** or **MiniLM-L6-v2** run on-device via ONNX Runtime / TFLite within a **<50ms latency budget** per newly copied clip without causing foreground touch stutter?
-  - Or should we use a dual-tier architecture: fast local lexical search (FTS5) for immediate typing, paired with asynchronous background vectorization?
-- **Ultra-Fast Cloud Inference (Inco GLM 5.3 Flash & Mercury 2.5)**:
-  - We have access to ultra-fast inference APIs such as **Inco GLM 5.3 Flash** (~600 TPS) and **Mercury 2.5**.
-  - How should we architect the query pipeline when the user types a natural-language question in the search bar (e.g., *"What was the wifi password I copied yesterday?"*)? Should the LLM generate SQL FTS / vector search filters, or synthesize answers directly with clipboard citations?
-- **Vector Indexing Inside Android SQLite**:
-  - What is the most reliable, maintainable vector storage mechanism on Android 13:
-    1. Precompiled `sqlite-vec` C extension compiled for Android (`arm64-v8a`) loaded into SQLite via `sqlite3_load_extension`?
-    2. A pure Kotlin / Java HNSW (Hierarchical Navigable Small World) graph serialized to disk?
-    3. Flat brute-force cosine similarity over FloatArrays (viable for <5,000 clips on G99)?
-
-### 3. SolOS & LivePaper Ergonomics
-- The LivePaper display operates at 45Hz during static reading and bursts to 90Hz during scrolling and inking. How can semantic search highlights and AI query streaming be styled to maximize readability on high-contrast black/white transflective LCDs without mid-tone gray jank?
-
----
-
-*Please provide your critical, unvarnished feedback, specific failure modes you foresee, and prioritized recommendations.*
+*Please provide your critical, unvarnished architectural critique and recommendations.*
