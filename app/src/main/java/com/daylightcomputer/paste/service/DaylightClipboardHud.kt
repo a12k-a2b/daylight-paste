@@ -14,26 +14,27 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.daylightcomputer.paste.data.DaylightClip
+import com.daylightcomputer.paste.markdown.ClipType
 import com.daylightcomputer.paste.ui.MainActivity
 import com.daylightcomputer.paste.ui.theme.DaylightColors
 import com.daylightcomputer.paste.ui.theme.DaylightFontFamilies
 
 /**
- * SolOS LivePaper Floating Clipboard HUD.
+ * SolOS LivePaper Minimal Floating Clipboard HUD.
  * Replaces the stock Android 13 SystemUI clipboard overlay.
- * Appears at the bottom of the screen upon copy, showing content type, stats,
- * and quick-copy actions before auto-dismissing.
+ * Displays a non-intrusive 2-second ambient SolOS amber pill toast that never steals
+ * focus or blocks reading, with a tap-to-open gesture for full history inspection.
  */
 class DaylightClipboardHud(private val context: Context) {
 
@@ -44,7 +45,7 @@ class DaylightClipboardHud(private val context: Context) {
 
     fun show(clip: DaylightClip) {
         mainHandler.post {
-            dismiss() // Clear any existing HUD
+            dismiss() // Clear any existing HUD immediately
 
             val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -53,17 +54,36 @@ class DaylightClipboardHud(private val context: Context) {
                 WindowManager.LayoutParams.TYPE_PHONE
             }
 
+            val density = context.resources.displayMetrics.density
             val params = WindowManager.LayoutParams(
-                (340 * context.resources.displayMetrics.density).toInt(),
+                WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 layoutType,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                         WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT
             ).apply {
-                gravity = Gravity.BOTTOM or Gravity.START
-                x = (24 * context.resources.displayMetrics.density).toInt()
-                y = (48 * context.resources.displayMetrics.density).toInt()
+                gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                y = (56 * density).toInt() // Position safely above home gesture indicator
+            }
+
+            val countText = when {
+                clip.wordCount >= 1000 -> {
+                    val kWords = String.format(java.util.Locale.US, "%.1fk", clip.wordCount / 1000.0)
+                    "$kWords words"
+                }
+                clip.wordCount > 1 -> "${clip.wordCount} words"
+                clip.charCount > 0 -> "${clip.charCount} chars"
+                else -> ""
+            }
+
+            val toastLabel = when (clip.clipType) {
+                ClipType.MARKDOWN -> if (countText.isNotEmpty()) "Captured Markdown · $countText" else "Captured Markdown"
+                ClipType.CODE -> if (countText.isNotEmpty()) "Captured Code · $countText" else "Captured Code"
+                ClipType.URL -> "Captured Link"
+                ClipType.IMAGE -> "Captured Image"
+                ClipType.TEXT -> if (countText.isNotEmpty()) "Captured Text · $countText" else "Captured Text"
             }
 
             val composeView = ComposeView(context).apply {
@@ -71,138 +91,39 @@ class DaylightClipboardHud(private val context: Context) {
                     MaterialTheme {
                         Surface(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .border(2.dp, DaylightColors.BorderStrong, RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(24.dp))
+                                .border(1.dp, DaylightColors.AmberDeep, RoundedCornerShape(24.dp))
                                 .clickable {
-                                    // Open full Daylight Paste on tap
                                     val intent = Intent(context, MainActivity::class.java).apply {
                                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                                     }
                                     context.startActivity(intent)
                                     dismiss()
                                 },
-                            color = DaylightColors.PaperBg,
-                            shadowElevation = 6.dp
+                            color = DaylightColors.Amber595nm,
+                            shadowElevation = 0.dp // LivePaper rule: zero gaussian shadows
                         ) {
-                            Column(
-                                modifier = Modifier.padding(14.dp)
+                            Row(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // Header: Type badge & close
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Surface(
-                                            color = DaylightColors.Amber595nm,
-                                            shape = RoundedCornerShape(4.dp)
-                                        ) {
-                                            Text(
-                                                text = clip.clipType.name,
-                                                color = DaylightColors.PaperBg,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Success",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
 
-                                        Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(7.dp))
 
-                                        Text(
-                                            text = "${clip.charCount} chars · ${clip.wordCount} words",
-                                            fontFamily = DaylightFontFamilies.RomExtendedLight,
-                                            fontSize = 10.sp,
-                                            color = DaylightColors.InkSubtle
-                                        )
-                                    }
-
-                                    IconButton(
-                                        onClick = { dismiss() },
-                                        modifier = Modifier.size(24.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Close,
-                                            contentDescription = "Dismiss",
-                                            tint = DaylightColors.InkBlack,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(6.dp))
-
-                                // Title
                                 Text(
-                                    text = clip.title,
-                                    fontFamily = DaylightFontFamilies.ArizonaMix,
-                                    fontSize = 14.sp,
+                                    text = toastLabel,
+                                    fontFamily = DaylightFontFamilies.RomExtendedLight,
+                                    fontSize = 11.5.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = DaylightColors.InkBlack,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    color = Color.White,
+                                    letterSpacing = 0.8.sp
                                 )
-
-                                Spacer(modifier = Modifier.height(4.dp))
-
-                                // Snippet Preview
-                                Text(
-                                    text = clip.markdownContent.trim(),
-                                    fontFamily = DaylightFontFamilies.ArizonaSans,
-                                    fontSize = 12.sp,
-                                    color = DaylightColors.InkBlack,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-
-                                Spacer(modifier = Modifier.height(10.dp))
-
-                                // Quick Actions
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Button(
-                                        onClick = {
-                                            DaylightPasteManager.copyAsMarkdown(context, clip)
-                                            dismiss()
-                                        },
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = DaylightColors.Amber595nm,
-                                            contentColor = DaylightColors.PaperBg
-                                        ),
-                                        shape = RoundedCornerShape(6.dp),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                        modifier = Modifier.weight(1f).height(32.dp)
-                                    ) {
-                                        Text(
-                                            text = "COPY MARKDOWN",
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-
-                                    OutlinedButton(
-                                        onClick = {
-                                            DaylightPasteManager.copyAsPlainText(context, clip)
-                                            dismiss()
-                                        },
-                                        colors = ButtonDefaults.outlinedButtonColors(
-                                            contentColor = DaylightColors.InkBlack
-                                        ),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, DaylightColors.BorderStrong),
-                                        shape = RoundedCornerShape(6.dp),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                        modifier = Modifier.weight(1f).height(32.dp)
-                                    ) {
-                                        Text(
-                                            text = "PLAIN",
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
                             }
                         }
                     }
@@ -212,8 +133,8 @@ class DaylightClipboardHud(private val context: Context) {
             hudView = composeView
             try {
                 windowManager.addView(hudView, params)
-                // Schedule auto-dismiss after 4.0 seconds
-                mainHandler.postDelayed(autoDismissRunnable, 4000)
+                // SolOS rule: ambient 2.0-second auto-dismiss
+                mainHandler.postDelayed(autoDismissRunnable, 2000)
             } catch (e: Exception) {
                 e.printStackTrace()
             }

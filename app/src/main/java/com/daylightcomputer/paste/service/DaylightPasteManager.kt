@@ -12,6 +12,22 @@ object DaylightPasteManager {
 
     private const val MAX_BINDER_SAFE_CHARS = 400_000 // ~800KB UTF-16, safe under 1MB Binder ceiling
 
+    @Volatile
+    private var lastInternalCopiedText: String? = null
+    @Volatile
+    private var lastInternalCopiedTime: Long = 0L
+
+    fun markInternalCopy(text: String) {
+        lastInternalCopiedText = text
+        lastInternalCopiedTime = System.currentTimeMillis()
+    }
+
+    fun isRecentInternalCopy(text: String): Boolean {
+        val copied = lastInternalCopiedText ?: return false
+        val elapsed = System.currentTimeMillis() - lastInternalCopiedTime
+        return elapsed < 3000L && (copied == text || text.startsWith(copied))
+    }
+
     /**
      * Copies clean Markdown to system clipboard.
      * Guaranteed to preserve Markdown formatting in Day One, Obsidian, Noteshelf, etc.
@@ -27,6 +43,8 @@ object DaylightPasteManager {
             } else {
                 textToCopy
             }
+
+            markInternalCopy(safeText)
 
             val clipData = if (!clip.htmlContent.isNullOrBlank()) {
                 ClipData.newHtmlText(clip.title, safeText, clip.htmlContent)
@@ -50,6 +68,7 @@ object DaylightPasteManager {
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             val raw = MarkdownTranspiler.stripFormatting(clip.markdownContent)
             val safeText = if (raw.length > MAX_BINDER_SAFE_CHARS) raw.take(MAX_BINDER_SAFE_CHARS) else raw
+            markInternalCopy(safeText)
             val clipData = ClipData.newPlainText(clip.title, safeText)
             clipboard.setPrimaryClip(clipData)
             true

@@ -11,13 +11,16 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
 
     companion object {
         const val DATABASE_NAME = "daylight_paste.db"
-        const val DATABASE_VERSION = 1
+        const val DATABASE_VERSION = 2
 
         const val TABLE_CLIPS = "clips"
         const val COL_ID = "id"
         const val COL_TEXT_CONTENT = "text_content"
         const val COL_MARKDOWN_CONTENT = "markdown_content"
         const val COL_HTML_CONTENT = "html_content"
+        const val COL_IMAGE_URI = "image_uri"
+        const val COL_SUMMARY = "summary"
+        const val COL_EMBEDDING = "embedding"
         const val COL_TITLE = "title"
         const val COL_CLIP_TYPE = "clip_type"
         const val COL_CHAR_COUNT = "char_count"
@@ -49,6 +52,9 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
                 $COL_TEXT_CONTENT TEXT NOT NULL,
                 $COL_MARKDOWN_CONTENT TEXT NOT NULL,
                 $COL_HTML_CONTENT TEXT,
+                $COL_IMAGE_URI TEXT,
+                $COL_SUMMARY TEXT,
+                $COL_EMBEDDING BLOB,
                 $COL_TITLE TEXT NOT NULL,
                 $COL_CLIP_TYPE TEXT NOT NULL,
                 $COL_CHAR_COUNT INTEGER NOT NULL,
@@ -66,7 +72,17 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // Future schema migrations
+        if (oldVersion < 2) {
+            try {
+                db.execSQL("ALTER TABLE $TABLE_CLIPS ADD COLUMN $COL_IMAGE_URI TEXT")
+            } catch (ignored: Exception) {}
+            try {
+                db.execSQL("ALTER TABLE $TABLE_CLIPS ADD COLUMN $COL_SUMMARY TEXT")
+            } catch (ignored: Exception) {}
+            try {
+                db.execSQL("ALTER TABLE $TABLE_CLIPS ADD COLUMN $COL_EMBEDDING BLOB")
+            } catch (ignored: Exception) {}
+        }
     }
 
     fun insertClip(clip: DaylightClip): Long {
@@ -86,6 +102,9 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
             put(COL_TEXT_CONTENT, clip.textContent)
             put(COL_MARKDOWN_CONTENT, clip.markdownContent)
             put(COL_HTML_CONTENT, clip.htmlContent)
+            put(COL_IMAGE_URI, clip.imageUri)
+            put(COL_SUMMARY, clip.summary)
+            put(COL_EMBEDDING, clip.embedding)
             put(COL_TITLE, clip.title)
             put(COL_CLIP_TYPE, clip.clipType.name)
             put(COL_CHAR_COUNT, clip.charCount)
@@ -196,6 +215,16 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
         val text = c.getString(c.getColumnIndexOrThrow(COL_TEXT_CONTENT))
         val markdown = c.getString(c.getColumnIndexOrThrow(COL_MARKDOWN_CONTENT))
         val html = c.getString(c.getColumnIndexOrThrow(COL_HTML_CONTENT))
+
+        val imgCol = c.getColumnIndex(COL_IMAGE_URI)
+        val imageUri = if (imgCol != -1) c.getString(imgCol) else null
+
+        val summaryCol = c.getColumnIndex(COL_SUMMARY)
+        val summary = if (summaryCol != -1) c.getString(summaryCol) else null
+
+        val embedCol = c.getColumnIndex(COL_EMBEDDING)
+        val embedding = if (embedCol != -1) c.getBlob(embedCol) else null
+
         val title = c.getString(c.getColumnIndexOrThrow(COL_TITLE))
         val typeStr = c.getString(c.getColumnIndexOrThrow(COL_CLIP_TYPE))
         val charCount = c.getInt(c.getColumnIndexOrThrow(COL_CHAR_COUNT))
@@ -216,6 +245,9 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
             textContent = text,
             markdownContent = markdown,
             htmlContent = html,
+            imageUri = imageUri,
+            summary = summary,
+            embedding = embedding,
             title = title,
             clipType = clipType,
             charCount = charCount,
