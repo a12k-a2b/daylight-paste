@@ -23,9 +23,27 @@ data class DaylightClip(
         get() = clipType == ClipType.IMAGE || !imageUri.isNullOrBlank()
 
     val imageDimensions: String?
-        get() = summary?.substringBefore(" • ")
+        get() {
+            if (!isImage || summary.isNullOrBlank()) return null
+            return if (summary.contains(" • ")) {
+                summary.substringBefore(" • ").takeIf { it.contains("×") || it.contains("x") }
+            } else if (summary.contains("×") || summary.contains("x")) {
+                summary
+            } else {
+                null
+            }
+        }
 
     val imageFileSize: String?
-        get() = if (summary?.contains(" • ") == true) summary.substringAfter(" • ") else summary
+        get() {
+            if (!isImage || summary.isNullOrBlank()) return null
+            return if (summary.contains(" • ")) {
+                summary.substringAfter(" • ")
+            } else if (!summary.contains("×") && !summary.contains("x")) {
+                summary
+            } else {
+                null
+            }
+        }
 }
 

@@ -91,8 +91,18 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
         val latest = getLatestClip()
         if (latest != null) {
             val isSameText = clip.textContent.isNotBlank() && latest.textContent == clip.textContent && clip.clipType != ClipType.IMAGE
-            val isSameImage = !clip.imageUri.isNullOrBlank() && latest.imageUri == clip.imageUri
+            val isSameImage = clip.isImage && latest.isImage && (
+                (!clip.imageUri.isNullOrBlank() && latest.imageUri == clip.imageUri) ||
+                (!clip.summary.isNullOrBlank() && latest.summary == clip.summary && latest.title == clip.title)
+            )
             if (isSameText || isSameImage) {
+                // If it's a duplicate image, clean up newly written file to conserve disk space
+                if (isSameImage && clip.imageUri != latest.imageUri && !clip.imageUri.isNullOrBlank()) {
+                    try {
+                        val path = android.net.Uri.parse(clip.imageUri).path
+                        if (path != null) java.io.File(path).delete()
+                    } catch (ignored: Exception) {}
+                }
                 // Touch timestamp
                 val values = ContentValues().apply {
                     put(COL_CREATED_AT, System.currentTimeMillis())
@@ -147,6 +157,9 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
         val args = mutableListOf<String>()
 
         when (filterType.uppercase()) {
+            "THINGS_PILE" -> {
+                clauses.add("$COL_PINBOARD = 'THINGS_PILE'")
+            }
             "PINNED" -> {
                 clauses.add("$COL_IS_PINNED = 1")
             }
@@ -160,7 +173,7 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
                 clauses.add("$COL_CLIP_TYPE = 'URL'")
             }
             "IMAGES" -> {
-                clauses.add("$COL_CLIP_TYPE = 'IMAGE'")
+                clauses.add("($COL_CLIP_TYPE = 'IMAGE' OR ($COL_IMAGE_URI IS NOT NULL AND $COL_IMAGE_URI != ''))")
             }
             else -> {
                 // ALL: no type filter
@@ -168,8 +181,9 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
         }
 
         if (searchQuery.isNotBlank()) {
-            clauses.add("($COL_TEXT_CONTENT LIKE ? OR $COL_TITLE LIKE ? OR $COL_SOURCE_PACKAGE LIKE ? OR ($COL_SUMMARY IS NOT NULL AND $COL_SUMMARY LIKE ?))")
+            clauses.add("($COL_TEXT_CONTENT LIKE ? OR $COL_TITLE LIKE ? OR $COL_SOURCE_PACKAGE LIKE ? OR $COL_CLIP_TYPE LIKE ? OR ($COL_SUMMARY IS NOT NULL AND $COL_SUMMARY LIKE ?))")
             val param = "%$searchQuery%"
+            args.add(param)
             args.add(param)
             args.add(param)
             args.add(param)

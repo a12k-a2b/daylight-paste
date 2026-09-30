@@ -107,4 +107,48 @@ class ImageClipboardTest {
         val summary = "$width × $height • ${formatSize(fileSize)}"
         assertEquals("1200 × 1600 • 245.0 KB", summary)
     }
+
+    @Test
+    fun testTextClipWithSummaryHasNullImageAccessors() {
+        val textClip = DaylightClip(
+            id = 103,
+            textContent = "Note content",
+            markdownContent = "Note content",
+            summary = "Executive summary of long document",
+            title = "Summary Note",
+            clipType = ClipType.TEXT
+        )
+        assertFalse(textClip.isImage)
+        assertNull("imageDimensions must be null for non-image clip with text summary", textClip.imageDimensions)
+        assertNull("imageFileSize must be null for non-image clip with text summary", textClip.imageFileSize)
+    }
+
+    @Test
+    fun testImageClipWithOnlyFileSizeSummary() {
+        val imageClip = DaylightClip(
+            id = 104,
+            imageUri = "file:///clips/images/photo.png",
+            summary = "850.5 KB",
+            title = "Captured Image",
+            clipType = ClipType.IMAGE
+        )
+        assertTrue(imageClip.isImage)
+        assertNull("imageDimensions must be null when summary only has file size", imageClip.imageDimensions)
+        assertEquals("850.5 KB", imageClip.imageFileSize)
+    }
+
+    @Test
+    fun testImageContentUriGeneration() {
+        val uriStr = DaylightPasteContentProvider.getImageContentUriString("screen_55.png")
+        assertEquals("content://com.daylightcomputer.paste.provider/images/screen_55.png", uriStr)
+    }
+
+    @Test
+    fun testMimeTypesWithGifAndClips() {
+        assertEquals("image/png", DaylightPasteContentProvider.getMimeTypeForPath("/clips/images/photo.png"))
+        assertEquals("image/png", DaylightPasteContentProvider.getMimeTypeForPath("/data/user/0/com.daylightcomputer.paste/files/clips/images/1790796093872_ab3d7045.png"))
+        assertEquals("image/gif", DaylightPasteContentProvider.getMimeTypeForPath("/images/anim.gif"))
+        assertEquals("text/plain", DaylightPasteContentProvider.getMimeTypeForPath("/clips"))
+        assertEquals("text/plain", DaylightPasteContentProvider.getMimeTypeForPath("/clips/99"))
+    }
 }

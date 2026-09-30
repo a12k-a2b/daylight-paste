@@ -3,6 +3,7 @@ package com.daylightcomputer.paste.service
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import com.daylightcomputer.paste.data.DaylightClip
 import com.daylightcomputer.paste.markdown.MarkdownTranspiler
 import kotlinx.coroutines.Dispatchers
@@ -98,7 +99,20 @@ object DaylightPasteManager {
                 markInternalCopy(clip.imageUri)
             }
 
-            val clipData = ClipData.newUri(context.contentResolver, clip.title, contentUri)
+            val baseClipData = ClipData.newUri(context.contentResolver, clip.title, contentUri)
+            val grantIntent = Intent().apply {
+                data = contentUri
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val itemWithPermission = ClipData.Item(null, null, grantIntent, contentUri)
+            val clipData = ClipData(baseClipData.description, itemWithPermission)
+
+            listOf("com.daylightcomputer.paper", "com.daylightcomputer.launcher", "com.android.shell").forEach { pkg ->
+                try {
+                    context.grantUriPermission(pkg, contentUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                } catch (ignored: Exception) {}
+            }
+
             clipboard.setPrimaryClip(clipData)
             true
         } catch (e: Exception) {

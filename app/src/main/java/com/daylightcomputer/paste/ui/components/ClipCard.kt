@@ -333,11 +333,30 @@ fun ClipCard(
     }
 }
 
+object ThumbnailCache {
+    private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
+    private val cacheSize = maxMemory / 8
+
+    private val cache = object : android.util.LruCache<String, ImageBitmap>(cacheSize) {
+        override fun sizeOf(key: String, value: ImageBitmap): Int {
+            return (value.width * value.height * 4) / 1024
+        }
+    }
+
+    fun get(key: String): ImageBitmap? = cache.get(key)
+    fun put(key: String, bitmap: ImageBitmap) {
+        cache.put(key, bitmap)
+    }
+}
+
 @Composable
 fun rememberThumbnailBitmap(imageUriStr: String?): ImageBitmap? {
-    var bitmap by remember(imageUriStr) { mutableStateOf<ImageBitmap?>(null) }
+    val cached = remember(imageUriStr) {
+        imageUriStr?.let { ThumbnailCache.get(it) }
+    }
+    var bitmap by remember(imageUriStr) { mutableStateOf<ImageBitmap?>(cached) }
     LaunchedEffect(imageUriStr) {
-        if (imageUriStr.isNullOrBlank()) return@LaunchedEffect
+        if (imageUriStr.isNullOrBlank() || bitmap != null) return@LaunchedEffect
         withContext(Dispatchers.IO) {
             try {
                 val uri = Uri.parse(imageUriStr)
@@ -358,8 +377,10 @@ fun rememberThumbnailBitmap(imageUriStr: String?): ImageBitmap? {
                         }
                         val decoded = BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
                         decoded?.let {
+                            val imgBmp = it.asImageBitmap()
+                            ThumbnailCache.put(imageUriStr, imgBmp)
                             withContext(Dispatchers.Main) {
-                                bitmap = it.asImageBitmap()
+                                bitmap = imgBmp
                             }
                         }
                     }

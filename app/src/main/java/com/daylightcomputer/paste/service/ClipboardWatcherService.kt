@@ -71,13 +71,20 @@ class ClipboardWatcherService : Service() {
                 val clip = clipboardManager?.primaryClip ?: return@launch
                 if (clip.itemCount == 0) return@launch
 
-                val item = clip.getItemAt(0) ?: return@launch
-
-                // Detect if clip contains an image
-                if (isImageClip(clip.description, item)) {
-                    handleImageClip(item, clip.description)
-                    return@launch
+                // Detect if any clip item contains an image
+                var handledAsImage = false
+                for (i in 0 until clip.itemCount) {
+                    val candidate = clip.getItemAt(i) ?: continue
+                    if (isImageClip(clip.description, candidate)) {
+                        if (handleImageClip(candidate, clip.description)) {
+                            handledAsImage = true
+                            break
+                        }
+                    }
                 }
+                if (handledAsImage) return@launch
+
+                val item = clip.getItemAt(0) ?: return@launch
 
                 val rawText = item.text?.toString() ?: item.coerceToText(this@ClipboardWatcherService)?.toString() ?: ""
                 val htmlText = item.htmlText
@@ -139,16 +146,12 @@ class ClipboardWatcherService : Service() {
 
     private fun isImageClip(desc: ClipDescription?, item: ClipData.Item): Boolean {
         if (desc != null) {
-            if (desc.hasMimeType("image/*") ||
-                desc.hasMimeType("image/png") ||
-                desc.hasMimeType("image/jpeg") ||
-                desc.hasMimeType("image/webp") ||
-                desc.hasMimeType("image/gif")
-            ) {
-                return true
+            for (i in 0 until desc.mimeTypeCount) {
+                val mime = desc.getMimeType(i).lowercase()
+                if (mime.startsWith("image/")) return true
             }
         }
-        val uri = item.uri ?: return false
+        val uri = item.uri ?: item.intent?.data ?: return false
         val scheme = uri.scheme?.lowercase()
         if (scheme == "content") {
             try {
@@ -157,21 +160,21 @@ class ClipboardWatcherService : Service() {
             } catch (ignored: Exception) {}
         }
         val path = uri.path?.lowercase() ?: ""
-        return path.endsWith(".png") || path.endsWith(".jpg") || path.endsWith(".jpeg") || path.endsWith(".webp")
+        return path.endsWith(".png") || path.endsWith(".jpg") || path.endsWith(".jpeg") || path.endsWith(".webp") || path.endsWith(".gif")
     }
 
-    private fun handleImageClip(item: ClipData.Item, desc: ClipDescription?) {
-        val uri = item.uri ?: return
+    private fun handleImageClip(item: ClipData.Item, desc: ClipDescription?): Boolean {
+        val uri = item.uri ?: item.intent?.data ?: return false
         val uriStr = uri.toString()
 
         // Prevent self-capture loops
         if (DaylightPasteManager.isRecentInternalCopy(uriStr) ||
             uriStr.contains("com.daylightcomputer.paste.provider")
         ) {
-            return
+            return true
         }
 
-        try {
+        return try {
             val imagesDir = File(filesDir, "clips/images")
             if (!imagesDir.exists()) {
                 imagesDir.mkdirs()
@@ -180,15 +183,28 @@ class ClipboardWatcherService : Service() {
             val filename = "${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(8)}.png"
             val destFile = File(imagesDir, filename)
 
-            contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(destFile).use { output ->
-                    input.copyTo(output)
+            val sourceFile = if (uri.scheme == "file") {
+                val path = uri.path
+                if (path != null) File(path) else null
+            } else null
+
+            if (sourceFile != null && sourceFile.exists()) {
+                java.io.FileInputStream(sourceFile).use { input ->
+                    FileOutputStream(destFile).use { output ->
+                        input.copyTo(output)
+                    }
                 }
-            } ?: return
+            } else {
+                contentResolver.openInputStream(uri)?.use { input ->
+                    FileOutputStream(destFile).use { output ->
+                        input.copyTo(output)
+                    }
+                } ?: return false
+            }
 
             if (!destFile.exists() || destFile.length() == 0L) {
                 destFile.delete()
-                return
+                return false
             }
 
             // Decode image dimensions without loading entire bitmap into RAM
@@ -245,8 +261,10 @@ class ClipboardWatcherService : Service() {
             if (!isInternal) {
                 clipboardHud?.show(daylightClip)
             }
+            true
         } catch (e: Exception) {
             e.printStackTrace()
+            false
         }
     }
 

@@ -73,6 +73,8 @@ class DaylightTextSelectionShowcaseActivity : ComponentActivity() {
             window.isStatusBarContrastEnforced = false
         }
 
+        window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
+
         val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(android.graphics.Color.parseColor("#FAF8F5"))
@@ -98,62 +100,14 @@ class DaylightTextSelectionShowcaseActivity : ComponentActivity() {
             text = "Double-tap word · Triple-tap sentence · 4x tap paragraph · 280ms long-press"
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             setTextColor(android.graphics.Color.parseColor("#111111"))
-            setPadding(0, 0, 0, 16)
+            setPadding(0, 0, 0, 12)
         }
         rootLayout.addView(subheader)
 
-        // Status banner
-        statusText = TextView(this).apply {
-            text = "Ready. Tap or long-press text below to test caliper brackets and tooltip actions."
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            setTextColor(android.graphics.Color.parseColor("#D97706")) // Amber accent
-            setBackgroundColor(android.graphics.Color.parseColor("#EAE5DC"))
-            setPadding(16, 12, 16, 12)
-        }
-        rootLayout.addView(statusText)
-
-        val spacer1 = View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 16)
-        }
-        rootLayout.addView(spacer1)
-
-        // Multi-tap Selectable EditText
-        sampleEditor = EditText(this).apply {
-            setText(
-                """
-The Daylight DC-1 LivePaper display is a custom transflective reflective LCD screen engineered for pure ambient contrast. It eliminates backlight glare in sunlight while dynamic 45Hz to 90Hz VRR guarantees responsive stylus inking and whisper-quiet power consumption.
-
-When you select text on SolOS, sharp Caliper Brackets frame your thoughts. The long-press activation responds at a snappy 280ms threshold.
-
-Tap once to position your cursor. Double-tap to select a word. Triple-tap to select the entire sentence. Tap four times to highlight the full paragraph.
-
-Click 'Snip' in the floating menu to archive this insight directly to ThingsPile and Daylight Paper's Commonplace Book. Click 'Search' to open a non-blocking floating Link Bubble without losing your reading flow.
-                """.trimIndent()
-            )
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
-            setTextColor(android.graphics.Color.parseColor("#111111"))
-            setBackgroundColor(android.graphics.Color.parseColor("#FAF8F5"))
-            setPadding(24, 24, 24, 24)
-            gravity = Gravity.TOP or Gravity.START
-            setTextIsSelectable(true)
-            isFocusable = true
-            isFocusableInTouchMode = true
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                0,
-                1.0f
-            )
-        }
-
-        // Attach Multi-Tap Selection Listener
-        setupMultiTapSelection(sampleEditor)
-        rootLayout.addView(sampleEditor)
-
-        // Test Action Bar
+        // Action Buttons Row (Top pinned)
         val actionBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(0, 16, 0, 0)
+            setPadding(0, 0, 0, 16)
         }
 
         val btnStreamTest = Button(this).apply {
@@ -184,9 +138,107 @@ Click 'Snip' in the floating menu to archive this insight directly to ThingsPile
                 startActivity(intent)
             }
         }
-        actionBar.addView(btnSearchTest)
+        val btnWord = Button(this).apply {
+            text = "2x Word"
+            setBackgroundColor(android.graphics.Color.parseColor("#EAE5DC"))
+            setTextColor(android.graphics.Color.parseColor("#111111"))
+            val params = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { leftMargin = 12 }
+            layoutParams = params
+            setOnClickListener {
+                selectWordAt(sampleEditor, sampleEditor.text.toString(), 25)
+                statusText.text = "🎯 2x Tap Triggered: Selected Word 'LivePaper'"
+            }
+        }
+        actionBar.addView(btnWord)
+
+        val btnSentence = Button(this).apply {
+            text = "3x Sentence"
+            setBackgroundColor(android.graphics.Color.parseColor("#EAE5DC"))
+            setTextColor(android.graphics.Color.parseColor("#111111"))
+            val params = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { leftMargin = 12 }
+            layoutParams = params
+            setOnClickListener {
+                selectSentenceAt(sampleEditor, sampleEditor.text.toString(), 25)
+                statusText.text = "🎯 3x Tap Triggered: Selected Sentence"
+            }
+        }
+        actionBar.addView(btnSentence)
+
+        val btnParagraph = Button(this).apply {
+            text = "4x Paragraph"
+            setBackgroundColor(android.graphics.Color.parseColor("#EAE5DC"))
+            setTextColor(android.graphics.Color.parseColor("#111111"))
+            val params = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { leftMargin = 12 }
+            layoutParams = params
+            setOnClickListener {
+                selectParagraphAt(sampleEditor, sampleEditor.text.toString(), 25)
+                statusText.text = "🎯 4x Tap Triggered: Selected Paragraph"
+            }
+        }
+        actionBar.addView(btnParagraph)
 
         rootLayout.addView(actionBar)
+
+        // Status banner
+        statusText = TextView(this).apply {
+            text = "Ready. Tap or long-press text below to test caliper brackets and tooltip actions."
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setTextColor(android.graphics.Color.parseColor("#D97706")) // Amber accent
+            setBackgroundColor(android.graphics.Color.parseColor("#EAE5DC"))
+            setPadding(16, 12, 16, 12)
+        }
+        rootLayout.addView(statusText)
+
+        val spacer1 = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 16)
+        }
+        rootLayout.addView(spacer1)
+
+        // Multi-tap Selectable EditText (Read-only for pure reader text selection without IME)
+        sampleEditor = EditText(this).apply {
+            setText(
+                """
+The Daylight DC-1 LivePaper display is a custom transflective reflective LCD screen engineered for pure ambient contrast. It eliminates backlight glare in sunlight while dynamic 45Hz to 90Hz VRR guarantees responsive stylus inking and whisper-quiet power consumption.
+
+When you select text on SolOS, sharp Caliper Brackets frame your thoughts. The long-press activation responds at a snappy 280ms threshold.
+
+Tap once to position your cursor. Double-tap to select a word. Triple-tap to select the entire sentence. Tap four times to highlight the full paragraph.
+
+Click 'Snip' in the floating menu to archive this insight directly to ThingsPile and Daylight Paper's Commonplace Book. Click 'Search' to open a non-blocking floating Link Bubble without losing your reading flow.
+                """.trimIndent()
+            )
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+            setTextColor(android.graphics.Color.parseColor("#111111"))
+            setBackgroundColor(android.graphics.Color.parseColor("#FAF8F5"))
+            setPadding(24, 24, 24, 24)
+            gravity = Gravity.TOP or Gravity.START
+            setTextIsSelectable(true)
+            keyListener = null // Read-only selectable text (no soft keyboard)
+            isFocusable = true
+            isFocusableInTouchMode = true
+            isLongClickable = true
+            isClickable = true
+            showSoftInputOnFocus = false
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1.0f
+            )
+        }
+
+        // Attach Multi-Tap Selection Listener
+        setupMultiTapSelection(sampleEditor)
+        rootLayout.addView(sampleEditor)
+
         setContentView(rootLayout)
     }
 

@@ -42,8 +42,8 @@ open class DaylightPasteContentProvider : ContentProvider() {
                 addURI(AUTHORITY, "clips", CODE_CLIPS)
                 addURI(AUTHORITY, "clips/#", CODE_CLIP_ID)
                 addURI(AUTHORITY, "images", CODE_IMAGES)
-                addURI(AUTHORITY, "images/*", CODE_IMAGE_FILE)
                 addURI(AUTHORITY, "images/#", CODE_IMAGE_ID)
+                addURI(AUTHORITY, "images/*", CODE_IMAGE_FILE)
             }
         }
 
@@ -62,9 +62,12 @@ open class DaylightPasteContentProvider : ContentProvider() {
         fun getMimeTypeForPath(path: String?): String {
             val lower = path?.lowercase() ?: ""
             return when {
+                lower.endsWith(".png") -> "image/png"
                 lower.endsWith(".jpg") || lower.endsWith(".jpeg") -> "image/jpeg"
                 lower.endsWith(".webp") -> "image/webp"
-                lower.contains("/clips/") -> "text/plain"
+                lower.endsWith(".gif") -> "image/gif"
+                lower.contains("/images") -> "image/png"
+                lower.contains("/clips") -> "text/plain"
                 else -> "image/png"
             }
         }
@@ -87,8 +90,11 @@ open class DaylightPasteContentProvider : ContentProvider() {
             }
         }
 
+        fun getImageContentUriString(filename: String): String =
+            "content://$AUTHORITY/images/$filename"
+
         fun getImageContentUri(filename: String): Uri =
-            Uri.parse("content://$AUTHORITY/images/$filename")
+            Uri.parse(getImageContentUriString(filename))
     }
 
     protected lateinit var database: ClipDatabase
@@ -160,7 +166,18 @@ open class DaylightPasteContentProvider : ContentProvider() {
     }
 
     override fun getType(uri: Uri): String {
-        return getMimeTypeForPath(uri.path)
+        return when (MATCHER.match(uri)) {
+            CODE_CLIPS -> "vnd.android.cursor.dir/com.daylightcomputer.paste.clip"
+            CODE_CLIP_ID -> "text/plain"
+            CODE_IMAGES -> "vnd.android.cursor.dir/image"
+            CODE_IMAGE_ID -> {
+                val id = uri.lastPathSegment?.toLongOrNull()
+                val clip = id?.let { database.getClipById(it) }
+                getMimeTypeForPath(clip?.imageUri ?: uri.path)
+            }
+            CODE_IMAGE_FILE -> getMimeTypeForPath(uri.path)
+            else -> getMimeTypeForPath(uri.path)
+        }
     }
 
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
@@ -174,7 +191,7 @@ open class DaylightPasteContentProvider : ContentProvider() {
 
         val match = MATCHER.match(uri)
         when (match) {
-            CODE_IMAGE_FILE, CODE_IMAGE_ID, CODE_IMAGES -> {
+            CODE_IMAGE_FILE, CODE_IMAGE_ID -> {
                 val ctx = context ?: throw FileNotFoundException("Context is null")
                 val imagesDir = File(ctx.filesDir, "clips/images")
 
@@ -208,10 +225,11 @@ open class DaylightPasteContentProvider : ContentProvider() {
                     throw FileNotFoundException("Image file does not exist: ${file.absolutePath}")
                 }
 
-                // Security check: ensure path is within app storage to prevent traversal
+                // Security check: ensure path is within app internal storage to prevent traversal
                 val canonicalFilesDir = ctx.filesDir.canonicalPath
+                val canonicalCacheDir = ctx.cacheDir.canonicalPath
                 val canonicalFile = file.canonicalPath
-                if (!canonicalFile.startsWith(canonicalFilesDir)) {
+                if (!canonicalFile.startsWith(canonicalFilesDir) && !canonicalFile.startsWith(canonicalCacheDir)) {
                     throw SecurityException("Access outside app internal storage is denied: $canonicalFile")
                 }
 

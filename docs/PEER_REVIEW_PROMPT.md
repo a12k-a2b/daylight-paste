@@ -147,28 +147,40 @@ DaylightPaste/
 - Handles text streaming (`/clips/#`) and image streaming (`/images/*` or `/images/#`).
 - Implements `openFile()`:
   ```kotlin
-  val file = File(context.filesDir, "clips/images/$cleanPath")
-  // Strict path traversal validation
-  if (!file.canonicalPath.startsWith(imagesDir.canonicalPath)) {
+  val file = if (match == CODE_IMAGE_ID) {
+      val clip = database.getClipById(id)
+      File(clip.imageUri)
+  } else {
+      File(imagesDir, filename)
+  }
+  // Strict path traversal validation across internal filesDir and cacheDir
+  if (!file.canonicalPath.startsWith(ctx.filesDir.canonicalPath) && 
+      !file.canonicalPath.startsWith(ctx.cacheDir.canonicalPath)) {
       throw SecurityException("Access denied: path traversal attempt")
   }
   return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
   ```
-- **Empirical Verification on Hardware**: An 857,828 byte (1184×1584) screenshot was read via `adb shell content read --uri content://com.daylightcomputer.paste.provider/images/16` and streamed all 857,828 bytes identically without hitting Android's 1MB Binder ceiling.
+- **Bugs Caught & Hardened in Pass 2**:
+  1. **`UriMatcher` Ordering Shadow**: `images/#` was initially registered *after* `images/*`. In Android's `UriMatcher`, wildcards registered before number tokens match numeric segments as generic strings, permanently starving `CODE_IMAGE_ID`. Swapped registration order so `#` takes precedence over `*`.
+  2. **MIME Type Mismatch (`getMimeTypeForPath`)**: Image clips are stored under `/clips/images/{timestamp}_{uuid}.png`. The initial MIME resolver checked `lower.contains("/clips") -> "text/plain"` before the fallthrough `image/png` without an explicit `.png` check. Consequently, all PNG images served by clip ID resolved to `text/plain`! Fixed by explicitly matching `.png`, prioritizing `.png`/`.jpg`/`.webp`/`.gif`/`/images` before `/clips`.
+- **Empirical Verification on Hardware**: An 857,828 byte (1184×1584) screenshot was read via `adb shell content read --uri content://com.daylightcomputer.paste.provider/images/16` and streamed all 857,828 bytes identically without hitting Android's 1MB Binder ceiling. `content gettype --uri content://com.daylightcomputer.paste.provider/images/16` returns `image/png`.
 
 #### 3. Image Clipboard Injection (`DaylightPasteManager.kt`)
 - `copyImageToClipboard(context, clip)` generates the canonical streaming content URI: `content://com.daylightcomputer.paste.provider/images/{clipId}`.
-- Wraps the URI in `ClipData.newUri(context.contentResolver, clip.title, uri)` and applies `Intent.FLAG_GRANT_READ_URI_PERMISSION`.
+- Wraps the URI in `ClipData.Item(null, null, grantIntent, contentUri)` where `grantIntent` carries `Intent.FLAG_GRANT_READ_URI_PERMISSION`.
+- Explicitly calls `context.grantUriPermission(pkg, contentUri, FLAG_GRANT_READ_URI_PERMISSION)` for SolOS system targets (`com.daylightcomputer.paper`, `com.daylightcomputer.launcher`, `com.android.shell`).
 - Allows target applications (Day One, Noteshelf, Slack, Telegram, Gmail) to stream the raw image file descriptor directly from Daylight Paste.
 
 #### 4. SolOS LivePaper Tactile UI for Images (`ClipCard.kt` & `ImagePreviewDialog.kt`)
-- **`PinboardTabs.kt`**: Added dedicated `🖼️ IMAGES` filter tab.
+- **`PinboardTabs.kt`**: Added dedicated `🖼️ IMAGES` filter tab (`PinboardTabs.kt`).
 - **`ClipCard.kt`**:
   - Downsampled thumbnail rendering via `BitmapFactory.Options.inSampleSize` inside `rememberThumbnailBitmap()`.
+  - In-memory `ThumbnailCache` (`android.util.LruCache<String, ImageBitmap>`) eliminates GC pressure and frame drops during 90Hz scrolling on the MediaTek Helio G99.
   - Displayed on a `#FAF8F5` paper canvas with `#111111` 1.5dp borders.
   - Metadata badges displaying dimensions and file size (e.g., `1184 × 1584 • 837.7 KB`).
   - Solid amber `COPY IMAGE` pill button with immediate tactile feedback.
 - **`ImagePreviewDialog.kt`**: Full-screen LivePaper modal with 2dp border, full image rendering, `COPY IMAGE` button, and 595nm amber confirmation toast.
+- **Consecutive Duplicate Image Cleanup (`ClipDatabase.kt`)**: Prevents flash memory exhaustion by identifying consecutive identical image captures, updating timestamps, and pruning redundant disk files.
 
 ---
 

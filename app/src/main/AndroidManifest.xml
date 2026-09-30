@@ -88,11 +88,9 @@
             android:name=".ui.DaylightTextSelectionShowcaseActivity"
             android:label="Selection &amp; Caliper Test"
             android:theme="@style/Theme.Daylight.Paste"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-            </intent-filter>
-        </activity>
+            android:launchMode="singleInstance"
+            android:taskAffinity="com.daylightcomputer.paste.showcase"
+            android:exported="true" />
 
         <!-- Unlimited Clipboard Streaming Provider for Text & Images -->
         <provider
