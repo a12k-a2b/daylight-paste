@@ -50,28 +50,49 @@ class ProcessSnipActivity : Activity() {
                 pinboard = "THINGS_PILE"
             )
 
-            CoroutineScope(Dispatchers.IO).launch {
-                // 1. Save to ThingsPile / DaylightPaste Database
-                database.insertClip(clip)
+            var insertSuccess = false
+            try {
+                kotlinx.coroutines.runBlocking(Dispatchers.IO) {
+                    val clipId = database.insertClip(clip)
+                    if (clipId > 0) {
+                        insertSuccess = true
+                        val clipUri = com.daylightcomputer.paste.data.DaylightPasteContentProvider.getClipUri(clipId)
 
-                // 2. Dispatch to Daylight Paper Commonplace Book via system broadcast
-                try {
-                    val paperIntent = Intent("com.daylightcomputer.action.ADD_COMMONPLACE_ENTRY").apply {
-                        putExtra("extra_quote", markdownContent)
-                        putExtra("extra_title", title)
-                        putExtra("extra_source", sourceApp)
-                        putExtra("extra_timestamp", System.currentTimeMillis())
-                        setPackage("com.daylightcomputer.paper")
+                        // 2. Dispatch to Daylight Paper Commonplace Book via system broadcast with URI grant
+                        try {
+                            val paperIntent = Intent("com.daylightcomputer.action.ADD_COMMONPLACE_ENTRY").apply {
+                                putExtra("extra_clip_id", clipId)
+                                putExtra("extra_clip_uri", clipUri.toString())
+                                putExtra("extra_title", title)
+                                putExtra("extra_source", sourceApp)
+                                putExtra("extra_timestamp", System.currentTimeMillis())
+                                // Only attach inline text if safely under 64KB Binder threshold
+                                if (markdownContent.length < 16_000) {
+                                    putExtra("extra_quote", markdownContent)
+                                }
+                                data = clipUri
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                setPackage("com.daylightcomputer.paper")
+                            }
+                            grantUriPermission("com.daylightcomputer.paper", clipUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            sendBroadcast(paperIntent)
+                        } catch (e: Exception) {
+                            android.util.Log.e("ProcessSnip", "Failed to broadcast to Daylight Paper: ${e.message}")
+                        }
                     }
-                    sendBroadcast(paperIntent)
-                } catch (ignored: Exception) {}
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ProcessSnip", "Snip insertion failed: ${e.message}")
             }
 
-            // 3. Ambient 595nm amber toast confirmation
-            Toast.makeText(this, "✓ Snipped to ThingsPile · Commonplace Book", Toast.LENGTH_SHORT).show()
+            if (insertSuccess) {
+                Toast.makeText(this, "✓ Snipped to ThingsPile · Commonplace Book", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "✕ Failed to save snip", Toast.LENGTH_SHORT).show()
+            }
         }
 
-        // 4. Dismiss immediately so user never loses their reading flow
+        // Dismiss immediately so user never loses their reading flow
         finish()
     }
 }
