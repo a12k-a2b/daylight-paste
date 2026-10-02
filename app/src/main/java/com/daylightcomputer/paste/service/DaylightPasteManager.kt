@@ -78,20 +78,25 @@ object DaylightPasteManager {
      */
     fun copyAsMarkdown(context: Context, clip: DaylightClip): Boolean {
         return try {
+            val fullClip = if (clip.id > 0 && (clip.markdownContent.isEmpty() || clip.textContent.length <= 300)) {
+                ClipDatabase.getInstance(context).getClipById(clip.id) ?: clip
+            } else {
+                clip
+            }
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            val textToCopy = clip.markdownContent
+            val textToCopy = if (fullClip.markdownContent.isNotBlank()) fullClip.markdownContent else fullClip.textContent
             val byteSize = textToCopy.toByteArray(Charsets.UTF_8).size
 
             markInternalCopy(textToCopy)
 
-            val clipData = if (byteSize <= MAX_BINDER_BYTE_THRESHOLD || clip.id <= 0) {
+            val clipData = if (byteSize <= MAX_BINDER_BYTE_THRESHOLD || fullClip.id <= 0) {
                 // Direct in-memory copy for normal text
-                ClipData.newPlainText(clip.title, textToCopy)
+                ClipData.newPlainText(fullClip.title, textToCopy)
             } else {
                 // Large text: stream via ContentProvider ParcelFileDescriptor
-                val streamUri = DaylightPasteContentProvider.getClipUri(clip.id)
+                val streamUri = DaylightPasteContentProvider.getClipUri(fullClip.id, asMarkdown = true)
                 val preview = if (textToCopy.length > 500) {
-                    textToCopy.take(500) + "\n\n... [Streamed via Daylight Paste: ${clip.wordCount} words, ${clip.charCount} chars]"
+                    textToCopy.take(500) + "\n\n... [Streamed via Daylight Paste: ${fullClip.wordCount} words, ${fullClip.charCount} chars]"
                 } else {
                     textToCopy
                 }
@@ -102,9 +107,8 @@ object DaylightPasteManager {
                 }
 
                 val item = ClipData.Item(preview, null, grantIntent, streamUri)
-                val description = ClipDescription(clip.title, arrayOf("text/plain", "text/markdown"))
+                val description = ClipDescription(fullClip.title, arrayOf("text/markdown", "text/plain"))
                 ClipData(description, item).also { cd ->
-                    // Grant read permission to common SolOS system packages
                     grantStreamingPermissions(context, streamUri)
                 }
             }
@@ -122,18 +126,27 @@ object DaylightPasteManager {
      */
     fun copyAsPlainText(context: Context, clip: DaylightClip): Boolean {
         return try {
+            val fullClip = if (clip.id > 0 && (clip.textContent.isEmpty() || clip.textContent.length <= 300)) {
+                ClipDatabase.getInstance(context).getClipById(clip.id) ?: clip
+            } else {
+                clip
+            }
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            val raw = MarkdownTranspiler.stripFormatting(clip.markdownContent)
+            val raw = if (fullClip.textContent.isNotBlank()) {
+                fullClip.textContent
+            } else {
+                MarkdownTranspiler.stripFormatting(fullClip.markdownContent)
+            }
             val byteSize = raw.toByteArray(Charsets.UTF_8).size
 
             markInternalCopy(raw)
 
-            val clipData = if (byteSize <= MAX_BINDER_BYTE_THRESHOLD || clip.id <= 0) {
-                ClipData.newPlainText(clip.title, raw)
+            val clipData = if (byteSize <= MAX_BINDER_BYTE_THRESHOLD || fullClip.id <= 0) {
+                ClipData.newPlainText(fullClip.title, raw)
             } else {
-                val streamUri = DaylightPasteContentProvider.getClipUri(clip.id)
+                val streamUri = DaylightPasteContentProvider.getClipUri(fullClip.id, asMarkdown = false)
                 val preview = if (raw.length > 500) {
-                    raw.take(500) + "\n\n... [Streamed via Daylight Paste: ${clip.wordCount} words, ${clip.charCount} chars]"
+                    raw.take(500) + "\n\n... [Streamed via Daylight Paste: ${fullClip.wordCount} words, ${fullClip.charCount} chars]"
                 } else {
                     raw
                 }
@@ -144,7 +157,7 @@ object DaylightPasteManager {
                 }
 
                 val item = ClipData.Item(preview, null, grantIntent, streamUri)
-                ClipData(ClipDescription(clip.title, arrayOf("text/plain")), item).also {
+                ClipData(ClipDescription(fullClip.title, arrayOf("text/plain")), item).also {
                     grantStreamingPermissions(context, streamUri)
                 }
             }

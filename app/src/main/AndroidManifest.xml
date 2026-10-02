@@ -97,7 +97,7 @@
         <provider
             android:name=".data.DaylightPasteContentProvider"
             android:authorities="com.daylightcomputer.paste.provider"
-            android:exported="true"
+            android:exported="false"
             android:grantUriPermissions="true" />
 
         <service
