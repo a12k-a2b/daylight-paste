@@ -19,10 +19,11 @@ object DaylightColors {
     val BorderSubtle = Color(0xFFCDC6B8)
     val BorderMuted = Color(0xFFD5CFC5)
 
-    // Daylight Illumination & Accents
     val Amber595nm = Color(0xFFD97706)      // Pure 595nm DC analog glow
+    val Amber = Amber595nm
     val AmberDeep = Color(0xFFC87D20)       // Focused outlines / pressed state
     val AmberSoft = Color(0xFFFEF3C7)       // Subtle amber pill background
+    val ForestGreen = Color(0xFF15803D)    // System privileged status
     val Terracotta = Color(0xFF9C271D)      // Editorial red
     val Indigo = Color(0xFF1E3A8A)          // Classic fountain pen ink
 }

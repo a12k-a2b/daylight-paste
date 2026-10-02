@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SolOS System Privileged App Permissions for Daylight Paste -->
+<permissions>
+    <privapp-permissions package="com.daylightcomputer.paste">
+        <permission name="android.permission.READ_CLIPBOARD_IN_BACKGROUND" />
+    </privapp-permissions>
+</permissions>

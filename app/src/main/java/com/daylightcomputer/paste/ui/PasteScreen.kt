@@ -79,6 +79,8 @@ fun PasteScreen() {
     var aiAnswer by remember { mutableStateOf<String?>(null) }
     var activeReaderClip by remember { mutableStateOf<DaylightClip?>(null) }
     var confirmationMessage by remember { mutableStateOf<String?>(null) }
+    var showHealthDialog by remember { mutableStateOf(false) }
+    val accessState = remember { DaylightPasteManager.checkClipboardAccessState(context) }
 
     // Handle Android system back gesture / button
     androidx.activity.compose.BackHandler(enabled = activeReaderClip != null) {
@@ -385,6 +387,13 @@ fun PasteScreen() {
                         }
                     )
                 }
+            }
+
+            if (showHealthDialog) {
+                CaptureHealthDialog(
+                    accessState = accessState,
+                    onDismiss = { showHealthDialog = false }
+                )
             }
         }
     }
