@@ -52,19 +52,31 @@ class ImageClipboardTest {
         val authority = DaylightPasteContentProvider.AUTHORITY
         assertEquals("com.daylightcomputer.paste.provider", authority)
 
+        // Collection queries are intentionally denied (-1) to prevent enumeration of clipboard history
         assertEquals(
-            DaylightPasteContentProvider.CODE_CLIPS,
+            -1,
             DaylightPasteContentProvider.matchPath("content://$authority/clips")
+        )
+
+        assertEquals(
+            -1,
+            DaylightPasteContentProvider.matchPath("content://$authority/images")
+        )
+
+        // Representation endpoints
+        assertEquals(
+            DaylightPasteContentProvider.CODE_CLIP_MARKDOWN,
+            DaylightPasteContentProvider.matchPath("content://$authority/clips/42/markdown")
+        )
+
+        assertEquals(
+            DaylightPasteContentProvider.CODE_CLIP_PLAIN,
+            DaylightPasteContentProvider.matchPath("content://$authority/clips/42/plain")
         )
 
         assertEquals(
             DaylightPasteContentProvider.CODE_CLIP_ID,
             DaylightPasteContentProvider.matchPath("content://$authority/clips/42")
-        )
-
-        assertEquals(
-            DaylightPasteContentProvider.CODE_IMAGES,
-            DaylightPasteContentProvider.matchPath("content://$authority/images")
         )
 
         assertEquals(
@@ -84,6 +96,8 @@ class ImageClipboardTest {
         assertEquals("image/jpeg", DaylightPasteContentProvider.getMimeTypeForPath("/images/photo.jpg"))
         assertEquals("image/jpeg", DaylightPasteContentProvider.getMimeTypeForPath("/images/photo.jpeg"))
         assertEquals("image/webp", DaylightPasteContentProvider.getMimeTypeForPath("/images/vector.webp"))
+        assertEquals("text/markdown", DaylightPasteContentProvider.getMimeTypeForPath("/clips/12/markdown"))
+        assertEquals("text/plain", DaylightPasteContentProvider.getMimeTypeForPath("/clips/12/plain"))
         assertEquals("text/plain", DaylightPasteContentProvider.getMimeTypeForPath("/clips/12"))
     }
 

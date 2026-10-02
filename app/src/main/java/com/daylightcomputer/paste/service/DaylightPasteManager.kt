@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import com.daylightcomputer.paste.data.ClipDatabase
 import com.daylightcomputer.paste.data.DaylightClip
 import com.daylightcomputer.paste.data.DaylightPasteContentProvider
 import com.daylightcomputer.paste.markdown.MarkdownTranspiler

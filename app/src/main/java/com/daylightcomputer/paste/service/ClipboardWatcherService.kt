@@ -41,7 +41,7 @@ class ClipboardWatcherService : Service() {
         val timestamp: Long
     )
 
-    private val captureChannel = kotlinx.coroutines.channels.Channel<ClipCaptureTask>(capacity = 64)
+    private val captureChannel = kotlinx.coroutines.channels.Channel<ClipCaptureTask>(kotlinx.coroutines.channels.Channel.UNLIMITED)
     private var lastCapturedHash: String? = null
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {

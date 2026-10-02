@@ -8,8 +8,8 @@ import android.net.Uri
 class ClipStreamProvider : DaylightPasteContentProvider() {
     companion object {
         const val AUTHORITY = DaylightPasteContentProvider.AUTHORITY
-        val CONTENT_URI: Uri = DaylightPasteContentProvider.CONTENT_URI
 
-        fun getClipUri(clipId: Long): Uri = DaylightPasteContentProvider.getClipUri(clipId)
+        fun getClipUri(clipId: Long, asMarkdown: Boolean = true): Uri =
+            DaylightPasteContentProvider.getClipUri(clipId, asMarkdown)
     }
 }

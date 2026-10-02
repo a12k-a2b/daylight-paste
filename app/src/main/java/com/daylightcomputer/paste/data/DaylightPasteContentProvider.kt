@@ -47,6 +47,18 @@ open class DaylightPasteContentProvider : ContentProvider() {
             }
         }
 
+        fun matchPath(path: String): Int {
+            val clean = path.trim('/').removePrefix("content://$AUTHORITY/").trim('/')
+            return when {
+                clean.matches(Regex("clips/\\d+/markdown")) -> CODE_CLIP_MARKDOWN
+                clean.matches(Regex("clips/\\d+/plain")) -> CODE_CLIP_PLAIN
+                clean.matches(Regex("clips/\\d+")) -> CODE_CLIP_ID
+                clean.matches(Regex("images/\\d+")) -> CODE_IMAGE_ID
+                clean.startsWith("images/") -> CODE_IMAGE_FILE
+                else -> -1
+            }
+        }
+
         fun getMimeTypeForPath(path: String?): String {
             val lower = path?.lowercase() ?: ""
             return when {

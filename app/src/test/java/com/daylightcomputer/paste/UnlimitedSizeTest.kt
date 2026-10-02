@@ -3,6 +3,7 @@ package com.daylightcomputer.paste
 import com.daylightcomputer.paste.markdown.ClipType
 import com.daylightcomputer.paste.markdown.MarkdownTranspiler
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -73,5 +74,82 @@ class UnlimitedSizeTest {
         assertEquals(ClipType.TEXT, clipType)
         assertTrue("Stripped text must retain content", stripped.length > 400_000)
         assertTrue("Processing 500k characters should complete in under 5 seconds", elapsed < 5000)
+    }
+
+    @Test
+    fun testImeStreamingChunkBoundariesAndSurrogatePairs() {
+        // Construct a string with emoji surrogate pairs placed right on boundary edges
+        // High surrogate \uD83D, low surrogate \uDE00 (😀)
+        val emoji = "\uD83D\uDE00"
+        val padding = "123456789" // 9 chars
+        // 9 chars + 2 chars of emoji = 11 chars. With chunkSize = 10, index 9 falls between the surrogate pair!
+        val testString = padding + emoji + padding + emoji
+
+        val committedChunks = mutableListOf<String>()
+        val fakeIc = java.lang.reflect.Proxy.newProxyInstance(
+            android.view.inputmethod.InputConnection::class.java.classLoader,
+            arrayOf(android.view.inputmethod.InputConnection::class.java)
+        ) { _, method, args ->
+            if (method.name == "commitText") {
+                committedChunks.add(args[0].toString())
+                true
+            } else {
+                null
+            }
+        } as android.view.inputmethod.InputConnection
+
+        val success = com.daylightcomputer.paste.service.DaylightInputMethodService.streamTextInChunks(
+            ic = fakeIc,
+            text = testString,
+            chunkSize = 10
+        )
+
+        assertTrue("Streaming must succeed", success)
+        assertTrue("Must have multiple chunks", committedChunks.size > 1)
+
+        // Verify that no chunk ends with an orphaned high surrogate
+        for (chunk in committedChunks) {
+            if (chunk.isNotEmpty()) {
+                val lastChar = chunk.last()
+                assertFalse("Chunk must not end with an orphaned high surrogate", Character.isHighSurrogate(lastChar))
+            }
+        }
+
+        // Verify that concatenating all chunks reproduces the exact original string
+        val reconstructed = committedChunks.joinToString("")
+        assertEquals("Reconstructed string must match original perfectly", testString, reconstructed)
+    }
+
+    @Test
+    fun testImeStreamingGracefulFailureHandling() {
+        // 1. Null InputConnection returns false without crashing
+        val nullResult = com.daylightcomputer.paste.service.DaylightInputMethodService.streamTextInChunks(
+            ic = null,
+            text = "Testing null connection"
+        )
+        assertFalse("Must return false on null InputConnection", nullResult)
+
+        // 2. InputConnection commit failure aborts loop early
+        var commitCount = 0
+        val failingIc = java.lang.reflect.Proxy.newProxyInstance(
+            android.view.inputmethod.InputConnection::class.java.classLoader,
+            arrayOf(android.view.inputmethod.InputConnection::class.java)
+        ) { _, method, args ->
+            if (method.name == "commitText") {
+                commitCount++
+                commitCount < 2 // Fail on second chunk
+            } else {
+                null
+            }
+        } as android.view.inputmethod.InputConnection
+
+        val longText = "A".repeat(50)
+        val failResult = com.daylightcomputer.paste.service.DaylightInputMethodService.streamTextInChunks(
+            ic = failingIc,
+            text = longText,
+            chunkSize = 10
+        )
+        assertFalse("Must return false when commitText fails", failResult)
+        assertEquals("Must abort immediately after commitText returns false", 2, commitCount)
     }
 }
