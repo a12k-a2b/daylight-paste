@@ -218,11 +218,12 @@ open class DaylightPasteContentProvider : ContentProvider() {
                     var writer: java.io.OutputStreamWriter? = null
                     try {
                         writer = java.io.OutputStreamWriter(FileOutputStream(output.fileDescriptor), Charsets.UTF_8)
+                        val content = contentText ?: ""
                         val chunkSize = 8192
                         var offset = 0
-                        while (offset < contentText.length) {
-                            val end = kotlin.math.min(offset + chunkSize, contentText.length)
-                            writer.write(contentText, offset, end - offset)
+                        while (offset < content.length) {
+                            val end = kotlin.math.min(offset + chunkSize, content.length)
+                            writer.write(content, offset, end - offset)
                             offset = end
                         }
                         writer.flush()

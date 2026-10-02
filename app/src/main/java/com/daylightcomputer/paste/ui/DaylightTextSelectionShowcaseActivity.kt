@@ -290,91 +290,98 @@ Click 'Snip' in the floating menu to archive this insight directly to ThingsPile
 
     /**
      * Progressive Multi-Tap Selection:
-     * 2 taps = Word
-     * 3 taps = Sentence
+     * 2 taps = Word (Unicode BreakIterator)
+     * 3 taps = Sentence (Unicode BreakIterator)
      * 4 taps = Paragraph
      */
     private fun setupMultiTapSelection(editor: EditText) {
         var lastTapTime = 0L
+        var lastTapX = 0f
+        var lastTapY = 0f
         var tapCount = 0
-        val multiTapWindowMs = 450L
+        val multiTapWindowMs = 400L
+        val touchSlop = android.view.ViewConfiguration.get(this).scaledTouchSlop * 2f
 
         editor.setOnTouchListener { v, event ->
             if (event.action == MotionEvent.ACTION_UP) {
                 val now = SystemClock.uptimeMillis()
-                if (now - lastTapTime < multiTapWindowMs) {
+                val dx = kotlin.math.abs(event.x - lastTapX)
+                val dy = kotlin.math.abs(event.y - lastTapY)
+                val isWithinSlop = (dx * dx + dy * dy) <= (touchSlop * touchSlop)
+
+                if (now - lastTapTime < multiTapWindowMs && isWithinSlop) {
                     tapCount++
                 } else {
                     tapCount = 1
                 }
                 lastTapTime = now
+                lastTapX = event.x
+                lastTapY = event.y
 
                 val offset = editor.getOffsetForPosition(event.x, event.y)
                 val fullText = editor.text.toString()
 
                 when (tapCount) {
                     2 -> {
-                        // Word selection
                         selectWordAt(editor, fullText, offset)
                         statusText.text = "🎯 2x Tap: Word selected"
                     }
                     3 -> {
-                        // Sentence selection
                         selectSentenceAt(editor, fullText, offset)
                         statusText.text = "🎯 3x Tap: Sentence selected"
                     }
                     4 -> {
-                        // Paragraph selection
                         selectParagraphAt(editor, fullText, offset)
                         statusText.text = "🎯 4x Tap: Paragraph selected"
                         tapCount = 0
                     }
                 }
             }
-            false // Allow standard event dispatch so long-press and handles engage
+            false
         }
     }
 
     private fun selectWordAt(editor: EditText, text: String, offset: Int) {
         if (offset < 0 || offset >= text.length) return
-        var start = offset
-        var end = offset
-        while (start > 0 && !Character.isWhitespace(text[start - 1])) {
-            start--
+        val iterator = java.text.BreakIterator.getWordInstance()
+        iterator.setText(text)
+        var end = iterator.following(offset)
+        var start = iterator.previous()
+        while (start < end && start < text.length && !Character.isLetterOrDigit(text[start])) {
+            start++
         }
-        while (end < text.length && !Character.isWhitespace(text[end])) {
-            end++
+        while (end > start && end <= text.length && !Character.isLetterOrDigit(text[end - 1])) {
+            end--
         }
         if (start < end) {
             editor.setSelection(start, end)
-            editor.post { editor.performLongClick() }
+            editor.post {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    editor.startActionMode(editor.customSelectionActionModeCallback, ActionMode.TYPE_FLOATING)
+                }
+            }
         }
     }
 
     private fun selectSentenceAt(editor: EditText, text: String, offset: Int) {
         if (offset < 0 || offset >= text.length) return
-        var start = offset
-        var end = offset
+        val iterator = java.text.BreakIterator.getSentenceInstance()
+        iterator.setText(text)
+        var end = iterator.following(offset)
+        var start = iterator.previous()
 
-        val sentenceEnds = setOf('.', '!', '?', '\n')
-        while (start > 0 && !sentenceEnds.contains(text[start - 1])) {
-            start--
-        }
         // Skip leading whitespace
-        while (start < offset && Character.isWhitespace(text[start])) {
+        while (start < end && start < text.length && Character.isWhitespace(text[start])) {
             start++
-        }
-
-        while (end < text.length && !sentenceEnds.contains(text[end])) {
-            end++
-        }
-        if (end < text.length && text[end] != '\n') {
-            end++ // Include the ending punctuation
         }
 
         if (start < end) {
             editor.setSelection(start, end)
-            editor.post { editor.performLongClick() }
+            editor.post {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    editor.startActionMode(editor.customSelectionActionModeCallback, ActionMode.TYPE_FLOATING)
+                }
+            }
         }
     }
 
@@ -392,7 +399,11 @@ Click 'Snip' in the floating menu to archive this insight directly to ThingsPile
 
         if (start < end) {
             editor.setSelection(start, end)
-            editor.post { editor.performLongClick() }
+            editor.post {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    editor.startActionMode(editor.customSelectionActionModeCallback, ActionMode.TYPE_FLOATING)
+                }
+            }
         }
     }
 
