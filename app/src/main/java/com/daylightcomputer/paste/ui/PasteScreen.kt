@@ -294,12 +294,22 @@ fun PasteScreen() {
                                 clip = clip,
                                 semanticScore = if (searchQuery.isNotBlank() && isAiMode) scoredClip.score else null,
                                 onCopyMarkdown = {
-                                    DaylightPasteManager.copyAsMarkdown(context, clip)
-                                    confirmationMessage = "Copied Clean Markdown to Clipboard"
+                                    scope.launch(Dispatchers.IO) {
+                                        val fullClip = db.getClipById(clip.id) ?: clip
+                                        DaylightPasteManager.copyAsMarkdown(context, fullClip)
+                                        withContext(Dispatchers.Main) {
+                                            confirmationMessage = "Copied Clean Markdown to Clipboard"
+                                        }
+                                    }
                                 },
                                 onCopyPlain = {
-                                    DaylightPasteManager.copyAsPlainText(context, clip)
-                                    confirmationMessage = "Copied Plain Text to Clipboard"
+                                    scope.launch(Dispatchers.IO) {
+                                        val fullClip = db.getClipById(clip.id) ?: clip
+                                        DaylightPasteManager.copyAsPlainText(context, fullClip)
+                                        withContext(Dispatchers.Main) {
+                                            confirmationMessage = "Copied Plain Text to Clipboard"
+                                        }
+                                    }
                                 },
                                 onCopyImage = {
                                     DaylightPasteManager.copyImageToClipboard(context, clip)
@@ -318,7 +328,12 @@ fun PasteScreen() {
                                     }
                                 },
                                 onOpenReader = {
-                                    activeReaderClip = clip
+                                    scope.launch(Dispatchers.IO) {
+                                        val fullClip = db.getClipById(clip.id) ?: clip
+                                        withContext(Dispatchers.Main) {
+                                            activeReaderClip = fullClip
+                                        }
+                                    }
                                 }
                             )
                         }

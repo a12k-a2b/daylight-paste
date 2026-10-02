@@ -203,18 +203,24 @@ class DaylightInputMethodService : InputMethodService() {
      * Prevents Binder buffer exhaustion and UI freezes on 100k+ word payloads.
      */
     private fun streamClipToEditor(clip: DaylightClip) {
-        val ic = currentInputConnection ?: return
         serviceScope.launch {
-            withContext(Dispatchers.IO) {
-                // Fetch full text from database
-                val fullClip = database.getClipById(clip.id) ?: clip
-                val text = if (fullClip.markdownContent.isNotBlank()) {
-                    fullClip.markdownContent
-                } else {
-                    fullClip.textContent
-                }
+            val fullClip = withContext(Dispatchers.IO) {
+                database.getClipById(clip.id) ?: clip
+            }
+            val text = if (fullClip.markdownContent.isNotBlank()) {
+                fullClip.markdownContent
+            } else {
+                fullClip.textContent
+            }
 
-                streamTextInChunks(ic, text)
+            val ic = currentInputConnection
+            if (ic != null) {
+                val success = streamTextInChunks(ic, text)
+                if (!success) {
+                    android.util.Log.w("DaylightIME", "InputConnection streaming aborted or connection lost for clip #${fullClip.id}")
+                }
+            } else {
+                android.util.Log.w("DaylightIME", "currentInputConnection is null; cannot stream clip #${fullClip.id}")
             }
         }
     }
@@ -224,8 +230,10 @@ class DaylightInputMethodService : InputMethodService() {
 
         /**
          * Streams arbitrary-length text into an InputConnection without splitting surrogate pairs.
+         * Returns true if all chunks were committed successfully, or false if InputConnection aborted.
          */
-        fun streamTextInChunks(ic: InputConnection, text: String, chunkSize: Int = CHUNK_SIZE) {
+        fun streamTextInChunks(ic: InputConnection?, text: String, chunkSize: Int = CHUNK_SIZE): Boolean {
+            if (ic == null) return false
             var offset = 0
             val len = text.length
             while (offset < len) {
@@ -235,9 +243,13 @@ class DaylightInputMethodService : InputMethodService() {
                     nextEnd--
                 }
                 val chunk = text.substring(offset, nextEnd)
-                ic.commitText(chunk, 1)
+                val success = ic.commitText(chunk, 1)
+                if (!success) {
+                    return false
+                }
                 offset = nextEnd
             }
+            return true
         }
     }
 

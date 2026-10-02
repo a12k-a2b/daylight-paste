@@ -36,7 +36,9 @@ import com.daylightcomputer.paste.service.DaylightPasteManager
 import com.daylightcomputer.paste.ui.components.SearchBar
 import com.daylightcomputer.paste.ui.theme.DaylightColors
 import com.daylightcomputer.paste.ui.theme.DaylightFontFamilies
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -186,7 +188,7 @@ class ProcessPasteActivity : ComponentActivity() {
                                                         android.widget.Toast.makeText(this@ProcessPasteActivity, "✓ Copied Image to Clipboard", android.widget.Toast.LENGTH_SHORT).show()
                                                         finish()
                                                     } else {
-                                                        onClipSelected(clip.markdownContent, isReadOnly, clip)
+                                                        handleClipSelection(clip, isMarkdown = true, isReadOnly = isReadOnly)
                                                     }
                                                 },
                                             color = DaylightColors.CardBg,
@@ -244,8 +246,9 @@ class ProcessPasteActivity : ComponentActivity() {
                                                         overflow = TextOverflow.Ellipsis
                                                     )
                                                 } else {
+                                                    val previewText = if (clip.markdownContent.isNotBlank()) clip.markdownContent else clip.textContent
                                                     Text(
-                                                        text = clip.markdownContent.trim(),
+                                                        text = previewText.trim(),
                                                         fontFamily = DaylightFontFamilies.ArizonaSans,
                                                         fontSize = 13.sp,
                                                         color = DaylightColors.InkSubtle,
@@ -301,8 +304,7 @@ class ProcessPasteActivity : ComponentActivity() {
                                                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                                             OutlinedButton(
                                                                 onClick = {
-                                                                    val plain = MarkdownTranspiler.stripFormatting(clip.markdownContent)
-                                                                    onClipSelected(plain, isReadOnly, clip)
+                                                                    handleClipSelection(clip, isMarkdown = false, isReadOnly = isReadOnly)
                                                                 },
                                                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = DaylightColors.InkBlack),
                                                                 shape = RoundedCornerShape(6.dp),
@@ -319,7 +321,7 @@ class ProcessPasteActivity : ComponentActivity() {
 
                                                             Button(
                                                                 onClick = {
-                                                                    onClipSelected(clip.markdownContent, isReadOnly, clip)
+                                                                    handleClipSelection(clip, isMarkdown = true, isReadOnly = isReadOnly)
                                                                 },
                                                                 colors = ButtonDefaults.buttonColors(
                                                                     containerColor = DaylightColors.Amber595nm,
@@ -352,22 +354,56 @@ class ProcessPasteActivity : ComponentActivity() {
         }
     }
 
-    private fun onClipSelected(textToPaste: String, isReadOnly: Boolean, originalClip: DaylightClip) {
-        if (!isReadOnly) {
-            // Cap at safe Binder payload size (100k UTF-16 chars ~ 200KB) to prevent TransactionTooLargeException
-            val safeText = if (textToPaste.length > 100_000) textToPaste.take(100_000) else textToPaste
-            val resultIntent = Intent().apply {
-                putExtra(Intent.EXTRA_PROCESS_TEXT, safeText)
+    private fun handleClipSelection(clip: DaylightClip, isMarkdown: Boolean, isReadOnly: Boolean) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val fullClip = if (clip.id > 0) {
+                ClipDatabase.getInstance(applicationContext).getClipById(clip.id) ?: clip
+            } else {
+                clip
             }
-            setResult(RESULT_OK, resultIntent)
-        } else {
-            // In read-only contexts, place the user's selected format (PLAIN or MARKDOWN) on clipboard
-            val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            val safeText = if (textToPaste.length > 400_000) textToPaste.take(400_000) else textToPaste
-            DaylightPasteManager.markInternalCopy(safeText)
-            clipboard.setPrimaryClip(android.content.ClipData.newPlainText(originalClip.title, safeText))
-            android.widget.Toast.makeText(this, "✓ Copied to Clipboard", android.widget.Toast.LENGTH_SHORT).show()
+
+            val textToUse = if (isMarkdown) {
+                if (fullClip.markdownContent.isNotBlank()) fullClip.markdownContent else fullClip.textContent
+            } else {
+                if (fullClip.textContent.isNotBlank()) fullClip.textContent else MarkdownTranspiler.stripFormatting(fullClip.markdownContent)
+            }
+
+            withContext(Dispatchers.Main) {
+                if (!isReadOnly) {
+                    val byteSize = textToUse.toByteArray(Charsets.UTF_8).size
+                    // 64KB safe ceiling for Binder Transaction
+                    if (byteSize <= 64 * 1024) {
+                        val resultIntent = Intent().apply {
+                            putExtra(Intent.EXTRA_PROCESS_TEXT, textToUse)
+                        }
+                        setResult(RESULT_OK, resultIntent)
+                        finish()
+                    } else {
+                        // Beyond 64KB: place full clip on clipboard via streaming provider without truncation
+                        if (isMarkdown) {
+                            DaylightPasteManager.copyAsMarkdown(this@ProcessPasteActivity, fullClip)
+                        } else {
+                            DaylightPasteManager.copyAsPlainText(this@ProcessPasteActivity, fullClip)
+                        }
+                        android.widget.Toast.makeText(
+                            this@ProcessPasteActivity,
+                            "✓ Large clip (${fullClip.wordCount} words) placed on clipboard; use Paste to insert",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                        setResult(RESULT_CANCELED)
+                        finish()
+                    }
+                } else {
+                    // Read-only context: copy full clip without truncation
+                    if (isMarkdown) {
+                        DaylightPasteManager.copyAsMarkdown(this@ProcessPasteActivity, fullClip)
+                    } else {
+                        DaylightPasteManager.copyAsPlainText(this@ProcessPasteActivity, fullClip)
+                    }
+                    android.widget.Toast.makeText(this@ProcessPasteActivity, "✓ Copied to Clipboard", android.widget.Toast.LENGTH_SHORT).show()
+                    finish()
+                }
+            }
         }
-        finish()
     }
 }
