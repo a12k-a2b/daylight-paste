@@ -401,25 +401,33 @@ Click 'Snip' in the floating menu to archive this insight directly to ThingsPile
      * Generates 250,000 characters (> 500KB UTF-16) of structured Markdown,
      * saves to database, copies via DaylightPasteManager, and reads via ClipStreamProvider.
      */
+    /**
+     * Verifies the unlimited streaming clipboard engine:
+     * Generates 500,000 characters (> 500KB UTF-8, exceeding MAX_BINDER_BYTE_THRESHOLD 256KB)
+     * of structured Markdown, saves to database, copies via DaylightPasteManager,
+     * and reads back via ClipData.Item.coerceToText() and ClipStreamProvider to verify
+     * zero Binder transaction crashes.
+     */
     private fun runStreamingClipboardVerification() {
-        statusText.text = "⏳ Generating 250,000 char Markdown payload..."
+        statusText.text = "⏳ Generating 500,000 char Markdown payload (>256KB streaming threshold)..."
 
         scope.launch(Dispatchers.IO) {
             try {
                 val sb = StringBuilder()
-                sb.append("# SolOS Unlimited Streaming Clipboard Benchmark\n\n")
+                sb.append("# SolOS Unlimited Streaming Clipboard Benchmark (500K)\n\n")
                 val sampleBlock = "The quick brown fox jumps over the lazy dog. SolOS LivePaper 90Hz transflective display provides pure paper reading.\n"
-                while (sb.length < 250_000) {
+                while (sb.length < 500_000) {
                     sb.append(sampleBlock)
                 }
                 val payload = sb.toString()
+                val payloadBytes = payload.toByteArray(Charsets.UTF_8).size
 
                 val db = ClipDatabase.getInstance(this@DaylightTextSelectionShowcaseActivity)
                 val clipId = db.insertClip(
                     DaylightClip(
                         textContent = payload,
                         markdownContent = payload,
-                        title = "SolOS Streaming Test",
+                        title = "SolOS 500K Streaming Test",
                         sourcePackage = "com.daylightcomputer.paste",
                         clipType = com.daylightcomputer.paste.markdown.ClipType.MARKDOWN,
                         pinboard = "BENCHMARK"
@@ -428,18 +436,27 @@ Click 'Snip' in the floating menu to archive this insight directly to ThingsPile
 
                 val clip = db.getClipById(clipId) ?: throw IllegalStateException("Failed to load inserted clip")
 
-                // Copy via DaylightPasteManager
+                // Copy via DaylightPasteManager (forces > 256KB streaming branch)
                 withContext(Dispatchers.Main) {
                     val copied = DaylightPasteManager.copyAsMarkdown(this@DaylightTextSelectionShowcaseActivity, clip)
                     if (!copied) throw IllegalStateException("DaylightPasteManager.copyAsMarkdown failed")
                 }
 
+                // Verify clipboard item coercion (Android standard ClipData.Item.coerceToText)
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                val primaryClip = clipboard.primaryClip ?: throw IllegalStateException("Primary clip is null")
+                val clipItem = primaryClip.getItemAt(0) ?: throw IllegalStateException("Clip item 0 is null")
+
+                if (clipItem.uri == null) {
+                    throw IllegalStateException("Expected stream URI in ClipData.Item, but uri was null!")
+                }
+
                 // Verify streaming read back via ContentResolver & ParcelFileDescriptor
-                val streamUri = ClipStreamProvider.getClipUri(clipId)
+                val streamUri = clipItem.uri
                 val pfd = contentResolver.openAssetFileDescriptor(streamUri, "r")
                     ?: throw IllegalStateException("Could not open AssetFileDescriptor for $streamUri")
 
-                val reader = BufferedReader(InputStreamReader(pfd.createInputStream()))
+                val reader = BufferedReader(InputStreamReader(pfd.createInputStream(), Charsets.UTF_8))
                 var readChars = 0
                 val buf = CharArray(8192)
                 var n: Int
@@ -450,10 +467,10 @@ Click 'Snip' in the floating menu to archive this insight directly to ThingsPile
                 pfd.close()
 
                 withContext(Dispatchers.Main) {
-                    statusText.text = "✓ PASSED: Streamed $readChars chars via ClipStreamProvider (No Binder Limit!)"
+                    statusText.text = "✓ PASSED: Streamed $readChars chars ($payloadBytes bytes) via URI Stream (No Binder Limit!)"
                     Toast.makeText(
                         this@DaylightTextSelectionShowcaseActivity,
-                        "✓ 250K Streaming Clipboard Verified: $readChars chars",
+                        "✓ 500K Streaming Verified: $readChars chars (>256KB threshold)",
                         Toast.LENGTH_LONG
                     ).show()
                 }

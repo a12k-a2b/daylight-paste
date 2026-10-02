@@ -79,25 +79,24 @@ class DaylightSearchBubbleActivity : ComponentActivity() {
                     dismissOnClickOutside = true
                 )
             ) {
-                // Dimmed ambient backdrop (tapping outside closes)
+                // Transparent click-outside backdrop (zero alpha scrim for pure LivePaper sunlight contrast)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(DaylightColors.InkBlack.copy(alpha = 0.35f))
                         .clickable(
                             indication = null,
                             interactionSource = remember { MutableInteractionSource() }
                         ) { finish() },
                     contentAlignment = Alignment.Center
                 ) {
-                    // Floating LivePaper stationery search card
+                    // Floating LivePaper stationery search card (strictly 2dp corners, 0dp elevation)
                     Surface(
                         modifier = Modifier
                             .width(580.dp)
                             .fillMaxHeight(0.82f)
                             .clickable(enabled = false) {}
-                            .clip(RoundedCornerShape(8.dp))
-                            .border(1.5.dp, DaylightColors.InkBlack, RoundedCornerShape(8.dp)),
+                            .clip(RoundedCornerShape(2.dp))
+                            .border(2.dp, DaylightColors.InkBlack, RoundedCornerShape(2.dp)),
                         color = DaylightColors.PaperBg,
                         shadowElevation = 0.dp // Strict zero-elevation on LivePaper
                     ) {
@@ -162,9 +161,25 @@ class DaylightSearchBubbleActivity : ComponentActivity() {
                                             loadWithOverviewMode = true
                                         }
                                         webViewClient = object : WebViewClient() {
+                                            override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean {
+                                                val targetUrl = request?.url?.toString() ?: return false
+                                                // Keep DuckDuckGo Lite search queries and pagination inside the bubble
+                                                if (targetUrl.contains("duckduckgo.com/lite") || targetUrl.contains("lite.duckduckgo.com")) {
+                                                    return false
+                                                }
+                                                // External result clicks open in full browser
+                                                return try {
+                                                    val browserIntent = Intent(Intent.ACTION_VIEW, request.url)
+                                                    context.startActivity(browserIntent)
+                                                    true
+                                                } catch (e: Exception) {
+                                                    false
+                                                }
+                                            }
+
                                             override fun onPageFinished(view: WebView?, url: String?) {
                                                 super.onPageFinished(view, url)
-                                                // Inject CSS for LivePaper high-contrast (#111111 ink on #FFFFFF)
+                                                // Inject CSS for LivePaper high-contrast (#111111 ink on #FAF8F5)
                                                 view?.evaluateJavascript(
                                                     """
                                                     document.body.style.backgroundColor = '#FAF8F5';

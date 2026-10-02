@@ -96,18 +96,16 @@ object DaylightPasteManager {
             } else {
                 // Large text: stream via ContentProvider ParcelFileDescriptor
                 val streamUri = DaylightPasteContentProvider.getClipUri(fullClip.id, asMarkdown = true)
-                val preview = if (textToCopy.length > 500) {
-                    textToCopy.take(500) + "\n\n... [Streamed via Daylight Paste: ${fullClip.wordCount} words, ${fullClip.charCount} chars]"
-                } else {
-                    textToCopy
-                }
 
                 val grantIntent = Intent().apply {
                     data = streamUri
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
 
-                val item = ClipData.Item(preview, null, grantIntent, streamUri)
+                // In Android's ClipData.Item.coerceToText(), if text is non-null, it returns text directly
+                // and ignores the URI. Passing null for text guarantees that coerceToText() resolves the URI
+                // stream via openInputStream(), delivering the full payload without 1MB Binder crash.
+                val item = ClipData.Item(null, null, grantIntent, streamUri)
                 val description = ClipDescription(fullClip.title, arrayOf("text/markdown", "text/plain"))
                 ClipData(description, item).also { cd ->
                     grantStreamingPermissions(context, streamUri)
@@ -157,7 +155,7 @@ object DaylightPasteManager {
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
 
-                val item = ClipData.Item(preview, null, grantIntent, streamUri)
+                val item = ClipData.Item(null, null, grantIntent, streamUri)
                 ClipData(ClipDescription(fullClip.title, arrayOf("text/plain")), item).also {
                     grantStreamingPermissions(context, streamUri)
                 }

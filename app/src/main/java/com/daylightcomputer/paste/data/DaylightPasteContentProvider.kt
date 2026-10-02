@@ -212,20 +212,25 @@ open class DaylightPasteContentProvider : ContentProvider() {
                     }
                 }
 
-                val textBytes = text.toByteArray(Charsets.UTF_8)
                 val mimeType = if (match == CODE_CLIP_MARKDOWN) "text/markdown" else "text/plain"
 
-                return openPipeHelper(uri, mimeType, null, textBytes) { output, _, _, _, bytes ->
-                    var fos: FileOutputStream? = null
+                return openPipeHelper(uri, mimeType, null, text) { output, _, _, _, contentText ->
+                    var writer: java.io.OutputStreamWriter? = null
                     try {
-                        fos = FileOutputStream(output.fileDescriptor)
-                        fos.write(bytes)
-                        fos.flush()
+                        writer = java.io.OutputStreamWriter(FileOutputStream(output.fileDescriptor), Charsets.UTF_8)
+                        val chunkSize = 8192
+                        var offset = 0
+                        while (offset < contentText.length) {
+                            val end = kotlin.math.min(offset + chunkSize, contentText.length)
+                            writer.write(contentText, offset, end - offset)
+                            offset = end
+                        }
+                        writer.flush()
                     } catch (e: IOException) {
                         e.printStackTrace()
                     } finally {
                         try {
-                            fos?.close()
+                            writer?.close()
                         } catch (ignored: Exception) {}
                     }
                 }
