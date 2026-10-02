@@ -1,5 +1,10 @@
 package com.daylightcomputer.paste.markdown
 
+import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
+import org.jsoup.nodes.Element
+import org.jsoup.nodes.Node
+import org.jsoup.nodes.TextNode
 import java.util.regex.Pattern
 
 enum class ClipType {
@@ -12,36 +17,17 @@ enum class ClipType {
 
 /**
  * Daylight Markdown Transpiler & Content Normalizer.
- * Reconstructs clean CommonMark / GitHub Flavored Markdown from HTML fragments,
- * rich text DOM trees, strips web artifacts (citations), and extracts structured metadata.
+ * Reconstructs clean CommonMark / GitHub Flavored Markdown from HTML fragments
+ * using a tolerant DOM parser (Jsoup) and deterministic AST visitor.
+ * 
+ * Guarantees:
+ * - Tolerant against malformed/unclosed HTML and deep nesting (depth-capped)
+ * - Zero regex ReDoS vulnerabilities
+ * - Preserves KaTeX/MathJax LaTeX annotations
+ * - Single-pass zero-allocation word counting
+ * - Preserves programming array indices (arr[0]) and math comparisons (<, >)
  */
 object MarkdownTranspiler {
-
-    private val HTML_TAG_PATTERN = Pattern.compile("</?[a-zA-Z][^>]*>", Pattern.DOTALL)
-    private val SCRIPT_PATTERN = Pattern.compile("<script(?:\\s+[^>]*)?>.*?</script>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    private val STYLE_PATTERN = Pattern.compile("<style(?:\\s+[^>]*)?>.*?</style>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    private val NOSCRIPT_PATTERN = Pattern.compile("<noscript(?:\\s+[^>]*)?>.*?</noscript>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    private val CODE_BLOCK_PATTERN = Pattern.compile("<pre(?:\\s+[^>]*)?>\\s*<code(?:\\s+class=[\"'](?:language-)?([a-zA-Z0-9_-]+)[\"'])?(?:\\s+[^>]*)?>(.*?)</code>\\s*</pre>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    private val PRE_PATTERN = Pattern.compile("<pre(?:\\s+[^>]*)?>(.*?)</pre>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    private val TABLE_PATTERN = Pattern.compile("<table(?:\\s+[^>]*)?>(.*?)</table>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    private val TR_PATTERN = Pattern.compile("<tr(?:\\s+[^>]*)?>(.*?)</tr>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    private val TH_OR_TD_PATTERN = Pattern.compile("<(th|td)(?:\\s+[^>]*)?>(.*?)</\\1>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    private val INLINE_CODE_PATTERN = Pattern.compile("<code(?:\\s+[^>]*)?>(.*?)</code>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    private val LINK_PATTERN = Pattern.compile("<a(?:\\s+[^>]*)?\\s+href=[\"']([^\"']+)[\"'](?:\\s+[^>]*)?>(.*?)</a>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    private val IMG_PATTERN = Pattern.compile("<img(?:\\s+[^>]*)?\\s+src=[\"']([^\"']+)[\"'](?:\\s+alt=[\"']([^\"']*)[\"'])?[^>]*>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    private val BOLD_PATTERN = Pattern.compile("<(?:b|strong)(?:\\s+[^>]*)?>(.*?)</(?:b|strong)>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    private val ITALIC_PATTERN = Pattern.compile("<(?:i|em)(?:\\s+[^>]*)?>(.*?)</(?:i|em)>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    private val STRIKE_PATTERN = Pattern.compile("<(?:s|strike|del)(?:\\s+[^>]*)?>(.*?)</(?:s|strike|del)>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    private val BLOCKQUOTE_PATTERN = Pattern.compile("<blockquote(?:\\s+[^>]*)?>(.*?)</blockquote>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    private val OL_PATTERN = Pattern.compile("<ol(?:\\s+[^>]*)?>(.*?)</ol>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    private val UL_PATTERN = Pattern.compile("<ul(?:\\s+[^>]*)?>(.*?)</ul>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    private val LI_PATTERN = Pattern.compile("<li(?:\\s+[^>]*)?>(.*?)</li>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    private val SUP_CITATION_PATTERN = Pattern.compile("<sup(?:\\s+[^>]*)?>\\s*(?:<a[^>]*>)?\\s*\\[?([1-9]\\d*(?:[-,]\\s*[1-9]\\d*)*|citation needed|note\\s*\\d+)\\]?\\s*(?:</a>)?\\s*</sup>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    
-    // Precompiled heading patterns for h1..h6
-    private val HEADING_PATTERNS = (1..6).map { i ->
-        Pattern.compile("<h$i(?:\\s+[^>]*)?>(.*?)</h$i>", Pattern.DOTALL or Pattern.CASE_INSENSITIVE)
-    }
 
     private val HTML_SNIFF_REGEX = Regex("<(html|body|div|p|span|a|h[1-6]|ul|ol|li|table|tr|td|th|pre|code|b|strong|i|em|br|hr)[^>]*>", RegexOption.IGNORE_CASE)
 
@@ -49,287 +35,225 @@ object MarkdownTranspiler {
         return HTML_SNIFF_REGEX.containsMatchIn(text)
     }
 
+    /**
+     * Tolerant DOM-based HTML to Markdown transpiler.
+     */
     fun transpileHtmlToMarkdown(html: String): String {
         if (html.isBlank()) return ""
-        var md = html
-
-        // 0a. Strip non-content script, style, and noscript blocks completely
-        md = SCRIPT_PATTERN.matcher(md).replaceAll("")
-        md = STYLE_PATTERN.matcher(md).replaceAll("")
-        md = NOSCRIPT_PATTERN.matcher(md).replaceAll("")
-
-        // 0b. Clean web citations and footnotes (e.g. Wikipedia sup tags)
-        md = SUP_CITATION_PATTERN.matcher(md).replaceAll("")
-
-        // Vault away code blocks and inline code so they are protected from all subsequent transforms
-        val codeBlocks = mutableListOf<String>()
-        val inlineCodes = mutableListOf<String>()
-
-        // 1. Code blocks (<pre><code>)
-        val codeBlockMatcher = CODE_BLOCK_PATTERN.matcher(md)
-        val sbCode = StringBuffer()
-        while (codeBlockMatcher.find()) {
-            val lang = codeBlockMatcher.group(1)?.trim() ?: ""
-            val rawInside = codeBlockMatcher.group(2) ?: ""
-            val cleanCode = cleanCodeBlockContent(rawInside)
-            val placeholder = "%%%DAYLIGHT_CODE_BLOCK_${codeBlocks.size}%%%"
-            codeBlocks.add("```$lang\n$cleanCode\n```")
-            codeBlockMatcher.appendReplacement(sbCode, java.util.regex.Matcher.quoteReplacement("\n\n$placeholder\n\n"))
+        if (!looksLikeHtml(html)) {
+            return stripInlineCitations(html)
         }
-        codeBlockMatcher.appendTail(sbCode)
-        md = sbCode.toString()
 
-        // 2. Standalone <pre>
-        val preMatcher = PRE_PATTERN.matcher(md)
-        val sbPre = StringBuffer()
-        while (preMatcher.find()) {
-            val rawInside = preMatcher.group(1) ?: ""
-            val cleanCode = cleanCodeBlockContent(rawInside)
-            val placeholder = "%%%DAYLIGHT_CODE_BLOCK_${codeBlocks.size}%%%"
-            codeBlocks.add("```\n$cleanCode\n```")
-            preMatcher.appendReplacement(sbPre, java.util.regex.Matcher.quoteReplacement("\n\n$placeholder\n\n"))
-        }
-        preMatcher.appendTail(sbPre)
-        md = sbPre.toString()
+        return try {
+            val doc = Jsoup.parseBodyFragment(html)
+            // 0. Remove non-content elements
+            doc.select("script, style, noscript").remove()
 
-        // 2b. Inline code <code>...</code>
-        val inlineCodeMatcher = INLINE_CODE_PATTERN.matcher(md)
-        val sbInline = StringBuffer()
-        while (inlineCodeMatcher.find()) {
-            val raw = inlineCodeMatcher.group(1) ?: ""
-            val clean = decodeHtmlEntities(raw.replace(Regex("<[^>]+>"), "")).trim()
-            val placeholder = "%%%DAYLIGHT_INLINE_CODE_${inlineCodes.size}%%%"
-            inlineCodes.add("`$clean`")
-            inlineCodeMatcher.appendReplacement(sbInline, java.util.regex.Matcher.quoteReplacement(placeholder))
-        }
-        inlineCodeMatcher.appendTail(sbInline)
-        md = sbInline.toString()
-
-        // 3. Tables (convert <table>...</table> to GFM Markdown table)
-        md = transpileTables(md)
-
-        // 4. Headings (h1 to h6) using precompiled patterns
-        for (i in 1..6) {
-            val hPattern = HEADING_PATTERNS[i - 1]
-            val hMatcher = hPattern.matcher(md)
-            val sbH = StringBuffer()
-            val prefix = "#".repeat(i) + " "
-            while (hMatcher.find()) {
-                val content = hMatcher.group(1)?.trim() ?: ""
-                val replacement = "\n\n$prefix$content\n\n"
-                hMatcher.appendReplacement(sbH, java.util.regex.Matcher.quoteReplacement(replacement))
+            // 1. Math formulas: KaTeX / MathJax annotation preservation
+            doc.select("annotation[encoding=application/x-tex]").forEach { annot ->
+                val tex = annot.text().trim()
+                val replacement = " $$" + tex + "$$ "
+                val target = annot.closest("span.katex") ?: annot
+                target.replaceWith(TextNode(replacement))
             }
-            hMatcher.appendTail(sbH)
-            md = sbH.toString()
-        }
 
-        // 5. Horizontal Rules
-        md = md.replace(Regex("<hr\\s*/?>", RegexOption.IGNORE_CASE), "\n\n---\n\n")
-
-        // 6. Blockquotes
-        val bqMatcher = BLOCKQUOTE_PATTERN.matcher(md)
-        val sbBq = StringBuffer()
-        while (bqMatcher.find()) {
-            val content = bqMatcher.group(1)?.trim() ?: ""
-            val lines = content.lines().joinToString("\n") { line -> "> " + line.trim() }
-            val replacement = "\n\n$lines\n\n"
-            bqMatcher.appendReplacement(sbBq, java.util.regex.Matcher.quoteReplacement(replacement))
-        }
-        bqMatcher.appendTail(sbBq)
-        md = sbBq.toString()
-
-        // 7. Ordered Lists (<ol>)
-        val olMatcher = OL_PATTERN.matcher(md)
-        val sbOl = StringBuffer()
-        while (olMatcher.find()) {
-            val olBody = olMatcher.group(1) ?: ""
-            val liMatcher = LI_PATTERN.matcher(olBody)
-            val listItems = mutableListOf<String>()
-            var idx = 1
-            while (liMatcher.find()) {
-                val item = liMatcher.group(1)?.trim() ?: ""
-                listItems.add("$idx. $item")
-                idx++
+            // 2. Wikipedia-style footnote citations (sup > a or plain sup)
+            doc.select("sup").forEach { sup ->
+                val text = sup.text().trim()
+                if (text.matches(Regex("^\\[?(?:[1-9]\\d*(?:[-,]\\s*[1-9]\\d*)*|citation needed|note\\s*\\d+)\\]?$", RegexOption.IGNORE_CASE))) {
+                    sup.remove()
+                }
             }
-            val replacement = "\n\n" + listItems.joinToString("\n") + "\n\n"
-            olMatcher.appendReplacement(sbOl, java.util.regex.Matcher.quoteReplacement(replacement))
+
+            val sb = StringBuilder()
+            convertNodeToMarkdown(doc.body(), sb, depth = 0, listDepth = 0)
+
+            var md = sb.toString()
+            md = stripInlineCitations(md)
+            md.replace(Regex("\n{3,}"), "\n\n").trim()
+        } catch (e: Exception) {
+            // Fallback to plain text on unexpected DOM error
+            html.replace(Regex("<[^>]+>"), "").trim()
         }
-        olMatcher.appendTail(sbOl)
-        md = sbOl.toString()
-
-        // 8. Unordered Lists (<ul>)
-        val ulMatcher = UL_PATTERN.matcher(md)
-        val sbUl = StringBuffer()
-        while (ulMatcher.find()) {
-            val ulBody = ulMatcher.group(1) ?: ""
-            val liMatcher = LI_PATTERN.matcher(ulBody)
-            val listItems = mutableListOf<String>()
-            while (liMatcher.find()) {
-                val item = liMatcher.group(1)?.trim() ?: ""
-                listItems.add("- $item")
-            }
-            val replacement = "\n\n" + listItems.joinToString("\n") + "\n\n"
-            ulMatcher.appendReplacement(sbUl, java.util.regex.Matcher.quoteReplacement(replacement))
-        }
-        ulMatcher.appendTail(sbUl)
-        md = sbUl.toString()
-
-        // Loose <li> tags outside of ul/ol
-        val looseLiMatcher = LI_PATTERN.matcher(md)
-        val sbLooseLi = StringBuffer()
-        while (looseLiMatcher.find()) {
-            val item = looseLiMatcher.group(1)?.trim() ?: ""
-            looseLiMatcher.appendReplacement(sbLooseLi, java.util.regex.Matcher.quoteReplacement("\n- $item"))
-        }
-        looseLiMatcher.appendTail(sbLooseLi)
-        md = sbLooseLi.toString()
-
-        // 9. Images (<img src="..." alt="..." />)
-        val imgMatcher = IMG_PATTERN.matcher(md)
-        val sbImg = StringBuffer()
-        while (imgMatcher.find()) {
-            val src = imgMatcher.group(1)?.trim() ?: ""
-            val alt = imgMatcher.group(2)?.trim() ?: "Image"
-            val replacement = "![$alt]($src)"
-            imgMatcher.appendReplacement(sbImg, java.util.regex.Matcher.quoteReplacement(replacement))
-        }
-        imgMatcher.appendTail(sbImg)
-        md = sbImg.toString()
-
-        // 10. Links (<a href="...">...</a>)
-        val linkMatcher = LINK_PATTERN.matcher(md)
-        val sbLink = StringBuffer()
-        while (linkMatcher.find()) {
-            val url = linkMatcher.group(1)?.trim() ?: ""
-            val label = linkMatcher.group(2)?.trim() ?: url
-            val replacement = if (label.isNotBlank()) "[$label]($url)" else url
-            linkMatcher.appendReplacement(sbLink, java.util.regex.Matcher.quoteReplacement(replacement))
-        }
-        linkMatcher.appendTail(sbLink)
-        md = sbLink.toString()
-
-        // 11. Inline Formatting
-        // Bold
-        md = replaceWithPattern(md, BOLD_PATTERN) {
-            val t = it.trim()
-            if (t.isNotEmpty()) "**$t**" else ""
-        }
-        // Italic
-        md = replaceWithPattern(md, ITALIC_PATTERN) {
-            val t = it.trim()
-            if (t.isNotEmpty()) "*$t*" else ""
-        }
-        // Strike
-        md = replaceWithPattern(md, STRIKE_PATTERN) {
-            val t = it.trim()
-            if (t.isNotEmpty()) "~~$t~~" else ""
-        }
-
-        // 12. Paragraphs and Linebreaks
-        md = md.replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
-        md = md.replace(Regex("<p(?:\\s+[^>]*)?>", RegexOption.IGNORE_CASE), "\n\n")
-        md = md.replace(Regex("</p>", RegexOption.IGNORE_CASE), "")
-        md = md.replace(Regex("<div(?:\\s+[^>]*)?>", RegexOption.IGNORE_CASE), "\n")
-        md = md.replace(Regex("</div>", RegexOption.IGNORE_CASE), "")
-
-        // 13. Strip any remaining HTML tags safely (matching real HTML tag names starting with a letter or /)
-        md = HTML_TAG_PATTERN.matcher(md).replaceAll("")
-
-        // 14. Decode remaining HTML entities
-        md = decodeHtmlEntities(md)
-
-        // 15. Strip remaining Wikipedia-style prose citations (code blocks/inline codes are vaulted)
-        md = stripInlineCitations(md)
-
-        // 16. Restore vaulted inline codes and code blocks
-        inlineCodes.forEachIndexed { index, code ->
-            md = md.replace("%%%DAYLIGHT_INLINE_CODE_${index}%%%", code)
-        }
-        codeBlocks.forEachIndexed { index, block ->
-            md = md.replace("%%%DAYLIGHT_CODE_BLOCK_${index}%%%", block)
-        }
-
-        // 17. Normalize excessive whitespace & blank lines
-        md = md.replace(Regex("\n{3,}"), "\n\n").trim()
-
-        return md
     }
 
-    private fun cleanCodeBlockContent(raw: String): String {
-        // Strip syntax highlighting spans e.g. <span class="hljs-keyword">
-        val noSpans = raw.replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
-            .replace(Regex("<[^>]+>"), "")
-        return decodeHtmlEntities(noSpans).trim()
+    private fun convertNodeToMarkdown(node: Node, sb: StringBuilder, depth: Int, listDepth: Int) {
+        if (depth > 256) return // Safeguard against runaway circular DOM structures
+
+        when (node) {
+            is TextNode -> {
+                sb.append(node.text())
+            }
+            is Element -> {
+                val tag = node.tagName().lowercase()
+                when (tag) {
+                    "h1", "h2", "h3", "h4", "h5", "h6" -> {
+                        val level = tag[1] - '0'
+                        val prefix = "#".repeat(level) + " "
+                        val content = renderChildrenToMarkdown(node, depth + 1, listDepth).trim()
+                        if (content.isNotEmpty()) {
+                            sb.append("\n\n").append(prefix).append(content).append("\n\n")
+                        }
+                    }
+                    "p" -> {
+                        val content = renderChildrenToMarkdown(node, depth + 1, listDepth).trim()
+                        if (content.isNotEmpty()) {
+                            sb.append("\n\n").append(content).append("\n\n")
+                        }
+                    }
+                    "br" -> {
+                        sb.append("\n")
+                    }
+                    "hr" -> {
+                        sb.append("\n\n---\n\n")
+                    }
+                    "b", "strong" -> {
+                        val inner = renderChildrenToMarkdown(node, depth + 1, listDepth).trim()
+                        if (inner.isNotEmpty()) sb.append("**").append(inner).append("**")
+                    }
+                    "i", "em" -> {
+                        val inner = renderChildrenToMarkdown(node, depth + 1, listDepth).trim()
+                        if (inner.isNotEmpty()) sb.append("*").append(inner).append("*")
+                    }
+                    "s", "strike", "del" -> {
+                        val inner = renderChildrenToMarkdown(node, depth + 1, listDepth).trim()
+                        if (inner.isNotEmpty()) sb.append("~~").append(inner).append("~~")
+                    }
+                    "pre" -> {
+                        val codeElem = node.selectFirst("code")
+                        val lang = if (codeElem != null) extractCodeLanguage(codeElem) else extractCodeLanguage(node)
+                        val codeContent = extractCodeText(codeElem ?: node)
+                        sb.append("\n\n```").append(lang).append("\n")
+                        sb.append(codeContent.trim())
+                        sb.append("\n```\n\n")
+                    }
+                    "code" -> {
+                        if (node.parent()?.tagName()?.lowercase() != "pre") {
+                            val inner = node.wholeText().trim()
+                            sb.append("`").append(inner).append("`")
+                        }
+                    }
+                    "blockquote" -> {
+                        val inner = renderChildrenToMarkdown(node, depth + 1, listDepth).trim()
+                        val quoted = inner.lines().joinToString("\n") { line -> "> " + line.trim() }
+                        sb.append("\n\n").append(quoted).append("\n\n")
+                    }
+                    "ul" -> {
+                        sb.append("\n\n")
+                        for (child in node.children()) {
+                            if (child.tagName().equals("li", ignoreCase = true)) {
+                                val indent = "  ".repeat(listDepth)
+                                val inner = renderChildrenToMarkdown(child, depth + 1, listDepth + 1).trim()
+                                sb.append(indent).append("- ").append(inner).append("\n")
+                            } else {
+                                convertNodeToMarkdown(child, sb, depth + 1, listDepth)
+                            }
+                        }
+                        sb.append("\n")
+                    }
+                    "ol" -> {
+                        sb.append("\n\n")
+                        var idx = 1
+                        for (child in node.children()) {
+                            if (child.tagName().equals("li", ignoreCase = true)) {
+                                val indent = "  ".repeat(listDepth)
+                                val inner = renderChildrenToMarkdown(child, depth + 1, listDepth + 1).trim()
+                                sb.append(indent).append("$idx. ").append(inner).append("\n")
+                                idx++
+                            } else {
+                                convertNodeToMarkdown(child, sb, depth + 1, listDepth)
+                            }
+                        }
+                        sb.append("\n")
+                    }
+                    "table" -> {
+                        val tableMd = renderTable(node, depth + 1, listDepth)
+                        sb.append("\n\n").append(tableMd).append("\n\n")
+                    }
+                    "a" -> {
+                        val href = node.attr("href").trim()
+                        val label = renderChildrenToMarkdown(node, depth + 1, listDepth).trim()
+                        if (href.isNotBlank()) {
+                            val text = if (label.isNotBlank()) label else href
+                            sb.append("[").append(text).append("](").append(href).append(")")
+                        } else if (label.isNotBlank()) {
+                            sb.append(label)
+                        }
+                    }
+                    "img" -> {
+                        val src = node.attr("src").trim()
+                        val alt = node.attr("alt").trim().ifBlank { "Image" }
+                        if (src.isNotBlank()) {
+                            sb.append("![").append(alt).append("](").append(src).append(")")
+                        }
+                    }
+                    else -> {
+                        for (child in node.childNodes()) {
+                            convertNodeToMarkdown(child, sb, depth + 1, listDepth)
+                        }
+                    }
+                }
+            }
+        }
     }
 
-    private fun transpileTables(html: String): String {
-        val tableMatcher = TABLE_PATTERN.matcher(html)
-        val sb = StringBuffer()
-        while (tableMatcher.find()) {
-            val tableBody = tableMatcher.group(1) ?: ""
-            val rows = mutableListOf<List<String>>()
-
-            val trMatcher = TR_PATTERN.matcher(tableBody)
-            while (trMatcher.find()) {
-                val trContent = trMatcher.group(1) ?: ""
-                val cellMatcher = TH_OR_TD_PATTERN.matcher(trContent)
-                val rowCells = mutableListOf<String>()
-                while (cellMatcher.find()) {
-                    val rawCell = cellMatcher.group(2) ?: ""
-                    // Quick inline cleaning for cells
-                    val cleanCell = transpileInlineTags(rawCell)
-                        .replace("\n", " ")
-                        .replace("|", "\\|")
-                        .trim()
-                    rowCells.add(cleanCell)
-                }
-                if (rowCells.isNotEmpty()) {
-                    rows.add(rowCells)
-                }
-            }
-
-            if (rows.isEmpty()) {
-                tableMatcher.appendReplacement(sb, "")
-                continue
-            }
-
-            val maxCols = rows.maxOf { it.size }
-            val mdTable = StringBuilder("\n\n")
-
-            // First row as header
-            val headerRow = rows[0]
-            val paddedHeader = (0 until maxCols).map { col ->
-                headerRow.getOrElse(col) { "" }
-            }
-            mdTable.append("| ").append(paddedHeader.joinToString(" | ")).append(" |\n")
-
-            // Separator row
-            val separator = (0 until maxCols).map { "---" }
-            mdTable.append("| ").append(separator.joinToString(" | ")).append(" |\n")
-
-            // Data rows (from row 1 onwards)
-            for (r in 1 until rows.size) {
-                val row = rows[r]
-                val paddedRow = (0 until maxCols).map { col ->
-                    row.getOrElse(col) { "" }
-                }
-                mdTable.append("| ").append(paddedRow.joinToString(" | ")).append(" |\n")
-            }
-            mdTable.append("\n")
-
-            tableMatcher.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(mdTable.toString()))
+    private fun renderChildrenToMarkdown(element: Element, depth: Int, listDepth: Int): String {
+        val sb = StringBuilder()
+        for (child in element.childNodes()) {
+            convertNodeToMarkdown(child, sb, depth, listDepth)
         }
-        tableMatcher.appendTail(sb)
         return sb.toString()
     }
 
-    private fun transpileInlineTags(input: String): String {
-        var s = input
-        s = replaceWithPattern(s, BOLD_PATTERN) { "**${it.trim()}**" }
-        s = replaceWithPattern(s, ITALIC_PATTERN) { "*${it.trim()}*" }
-        s = replaceWithPattern(s, INLINE_CODE_PATTERN) { "`" + decodeHtmlEntities(it).trim() + "`" }
-        s = HTML_TAG_PATTERN.matcher(s).replaceAll("")
-        return decodeHtmlEntities(s)
+    private fun extractCodeText(element: Element): String {
+        // Replace <br> with \n
+        element.select("br").forEach { it.replaceWith(TextNode("\n")) }
+        return element.wholeText()
+    }
+
+    private fun extractCodeLanguage(element: Element): String {
+        val classAttr = element.attr("class")
+        val match = Regex("(?:language-|hljs-|lang-)([a-zA-Z0-9_-]+)").find(classAttr)
+        return match?.groupValues?.get(1)?.lowercase() ?: ""
+    }
+
+    private fun renderTable(table: Element, depth: Int, listDepth: Int): String {
+        val rows = mutableListOf<List<String>>()
+        val trElements = table.select("tr")
+        for (tr in trElements) {
+            val cells = tr.select("th, td")
+            val rowCells = mutableListOf<String>()
+            for (cell in cells) {
+                val cleanCell = renderChildrenToMarkdown(cell, depth, listDepth)
+                    .replace("\n", " ")
+                    .replace("|", "\\|")
+                    .trim()
+                rowCells.add(cleanCell)
+            }
+            if (rowCells.isNotEmpty()) {
+                rows.add(rowCells)
+            }
+        }
+
+        if (rows.isEmpty()) return ""
+
+        val maxCols = rows.maxOf { it.size }
+        val mdTable = StringBuilder()
+
+        val headerRow = rows[0]
+        val paddedHeader = (0 until maxCols).map { col -> headerRow.getOrElse(col) { "" } }
+        mdTable.append("| ").append(paddedHeader.joinToString(" | ")).append(" |\n")
+
+        val separator = (0 until maxCols).map { "---" }
+        mdTable.append("| ").append(separator.joinToString(" | ")).append(" |\n")
+
+        for (r in 1 until rows.size) {
+            val row = rows[r]
+            val paddedRow = (0 until maxCols).map { col -> row.getOrElse(col) { "" } }
+            mdTable.append("| ").append(paddedRow.joinToString(" | ")).append(" |\n")
+        }
+
+        return mdTable.toString().trimEnd()
     }
 
     /**
@@ -338,7 +262,7 @@ object MarkdownTranspiler {
      * - Markdown links [text](url)
      * - Task list checkboxes [ ], [x]
      * - Programming array/index accesses (e.g. arr[0], items[1])
-     * - Fenced or inline code blocks (vaulted or delimited with backticks)
+     * - Fenced or inline code blocks
      */
     fun stripInlineCitations(text: String): String {
         if (text.isBlank()) return text
@@ -373,135 +297,99 @@ object MarkdownTranspiler {
         return processedLines.joinToString("\n")
     }
 
-    private fun replaceWithPattern(input: String, pattern: Pattern, transform: (String) -> String): String {
-        val matcher = pattern.matcher(input)
-        val sb = StringBuffer()
-        while (matcher.find()) {
-            val content = matcher.group(1) ?: ""
-            val replacement = transform(content)
-            matcher.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(replacement))
+    /**
+     * Extracts an intelligent, concise single-line title from clip content.
+     */
+    fun extractTitle(content: String): String {
+        val clean = stripFormatting(content)
+            .lines()
+            .firstOrNull { it.isNotBlank() }
+            ?.trim() ?: "Untitled Clip"
+        return if (clean.length > 80) clean.take(77).trimEnd() + "..." else clean
+    }
+
+    /**
+     * Single-pass zero-allocation word counter.
+     */
+    fun countWords(text: CharSequence): Int {
+        var count = 0
+        var inWord = false
+        val len = text.length
+        for (i in 0 until len) {
+            val c = text[i]
+            if (c.isWhitespace()) {
+                if (inWord) {
+                    count++
+                    inWord = false
+                }
+            } else {
+                inWord = true
+            }
         }
-        matcher.appendTail(sb)
-        return sb.toString()
+        if (inWord) {
+            count++
+        }
+        return count
     }
 
-    fun decodeHtmlEntities(text: String): String {
-        return text
-            .replace("&nbsp;", " ")
-            .replace("&amp;", "&")
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&quot;", "\"")
-            .replace("&#39;", "'")
-            .replace("&apos;", "'")
-            .replace("&#x2F;", "/")
-            .replace("&mdash;", "—")
-            .replace("&ndash;", "–")
-            .replace("&hellip;", "…")
+    fun stripFormatting(markdown: String): String {
+        if (markdown.isBlank()) return ""
+        var raw = markdown
+        raw = raw.replace(Regex("^#{1,6}\\s+", RegexOption.MULTILINE), "")
+        raw = raw.replace(Regex("`{3,}[^\\n]*\\n([\\s\\S]*?)\\n`{3,}"), "$1")
+        raw = raw.replace(Regex("`([^`]+)`"), "$1")
+        raw = raw.replace(Regex("\\*\\*([^*]+)\\*\\*"), "$1")
+        raw = raw.replace(Regex("__([^_]+)__"), "$1")
+        raw = raw.replace(Regex("\\*([^*]+)\\*"), "$1")
+        raw = raw.replace(Regex("_([^_]+)_"), "$1")
+        raw = raw.replace(Regex("~~([^~]+)~~"), "$1")
+        raw = raw.replace(Regex("\\[([^\\]]+)\\]\\([^)]+\\)"), "$1")
+        raw = raw.replace(Regex("!\\[[^\\]]*\\]\\([^)]+\\)"), "")
+        raw = raw.replace(Regex("^[*-]\\s+", RegexOption.MULTILINE), "")
+        raw = raw.replace(Regex("^\\d+\\.\\s+", RegexOption.MULTILINE), "")
+        raw = raw.replace(Regex("^>\\s+", RegexOption.MULTILINE), "")
+        return raw.trim()
     }
 
-    fun stripFormatting(text: String): String {
-        var s = text
-        // Remove code blocks
-        s = s.replace(Regex("```[a-zA-Z0-9_-]*\n?"), "")
-        // Remove inline code
-        s = s.replace(Regex("`([^`]+)`"), "$1")
-        // Remove bold/italics
-        s = s.replace(Regex("\\*\\*([^*]+)\\*\\*"), "$1")
-        s = s.replace(Regex("\\*([^*]+)\\*"), "$1")
-        s = s.replace(Regex("~~([^~]+)~~"), "$1")
-        // Remove links [text](url) -> text
-        s = s.replace(Regex("\\[([^\\]]+)\\]\\([^\\)]+\\)"), "$1")
-        // Remove images ![alt](url) -> alt
-        s = s.replace(Regex("!\\[([^\\]]*)\\]\\([^\\)]+\\)"), "$1")
-        // Remove headings #
-        s = s.replace(Regex("^#{1,6}\\s+", RegexOption.MULTILINE), "")
-        // Remove blockquotes >
-        s = s.replace(Regex("^>\\s+", RegexOption.MULTILINE), "")
-        // Remove list bullets & numbers
-        s = s.replace(Regex("^[\\*\\-\\+]\\s+", RegexOption.MULTILINE), "")
-        s = s.replace(Regex("^\\d+\\.\\s+", RegexOption.MULTILINE), "")
-        // Remove table pipes
-        s = s.replace(Regex("^\\|\\s*", RegexOption.MULTILINE), "")
-        s = s.replace(Regex("\\s*\\|\\s*", RegexOption.MULTILINE), " ")
-        s = s.replace(Regex("^---.*", RegexOption.MULTILINE), "")
-        return s.trim()
-    }
+    fun detectClipType(content: String, mimeType: String = ""): ClipType {
+        if (mimeType.startsWith("image/") || content.startsWith("content://") && (content.endsWith(".png") || content.endsWith(".jpg"))) {
+            return ClipType.IMAGE
+        }
 
-    fun detectClipType(text: String, rawHtml: String? = null): ClipType {
-        val trimmed = text.trim()
-        
-        // Check if URL
+        val trimmed = content.trim()
         if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-            if (!trimmed.contains(" ") && trimmed.length < 2048) {
+            if (!trimmed.contains("\n") && !trimmed.contains(" ")) {
                 return ClipType.URL
             }
         }
 
-        // Check if Code block or programming snippet
-        val isCode = trimmed.startsWith("```") ||
-                trimmed.startsWith("SELECT ") || trimmed.startsWith("CREATE TABLE ") ||
-                trimmed.startsWith("curl ") || trimmed.startsWith("adb ") ||
-                trimmed.startsWith("#!/") || trimmed.startsWith("git ") ||
-                trimmed.startsWith("docker ") || trimmed.startsWith("npm ") ||
-                (trimmed.startsWith("{") && trimmed.endsWith("}") && trimmed.contains("\":")) ||
-                (trimmed.startsWith("<!DOCTYPE html") || trimmed.startsWith("<html")) ||
-                (trimmed.contains("fun ") && trimmed.contains("(") && trimmed.contains(")")) ||
-                (trimmed.contains("def ") && trimmed.contains(":") && (trimmed.contains("return ") || trimmed.contains("import "))) ||
-                (trimmed.contains("function ") && trimmed.contains("{") && trimmed.contains("}")) ||
-                (trimmed.contains("class ") && trimmed.contains("{") && trimmed.contains("}")) ||
-                (trimmed.contains("public static void main")) ||
-                (trimmed.contains("val ") || trimmed.contains("var ") || trimmed.contains("let ") || trimmed.contains("const ")) ||
-                (trimmed.contains("import ") && (trimmed.contains("from ") || trimmed.contains(";")))
-
-        if (isCode) {
+        if (trimmed.startsWith("```") && trimmed.endsWith("```")) {
             return ClipType.CODE
         }
 
-        // Check if Markdown
-        val hasMarkdownTokens = trimmed.contains("# ") || trimmed.contains("## ") ||
-                trimmed.contains("**") || trimmed.contains("`") ||
-                trimmed.contains("- [ ]") || trimmed.contains("- [x]") ||
-                (trimmed.contains("[") && trimmed.contains("](") && trimmed.contains(")")) ||
-                (trimmed.contains("\n- ") || trimmed.contains("\n* ")) ||
-                (trimmed.contains("| ") && trimmed.contains(" |") && trimmed.contains("---"))
+        val codeIndicators = listOf(
+            Regex("^\\s*(val|var|fun|class|interface|object)\\s+[a-zA-Z0-9_]+", RegexOption.MULTILINE),
+            Regex("^\\s*(def|import|from|class)\\s+[a-zA-Z0-9_]+", RegexOption.MULTILINE),
+            Regex("^\\s*(const|let|var|function)\\s+[a-zA-Z0-9_]+", RegexOption.MULTILINE),
+            Regex("^\\s*(public|private|protected)?\\s*(void|int|double|String|boolean)\\s+[a-zA-Z0-9_]+", RegexOption.MULTILINE),
+            Regex("^\\s*(SELECT|INSERT|UPDATE|DELETE|CREATE TABLE)\\s+", setOf(RegexOption.IGNORE_CASE, RegexOption.MULTILINE)),
+            Regex("^\\s*(npm|pnpm|yarn|cargo|git|adb|curl|docker)\\s+", RegexOption.MULTILINE)
+        )
+        if (codeIndicators.any { it.containsMatchIn(trimmed) }) {
+            return ClipType.CODE
+        }
 
-        if (hasMarkdownTokens || (!rawHtml.isNullOrBlank() && looksLikeHtml(rawHtml))) {
+        val mdIndicators = listOf(
+            Regex("^#{1,6}\\s+", RegexOption.MULTILINE),
+            Regex("\\*\\*[^*]+\\*\\*"),
+            Regex("`[^`]+`"),
+            Regex("\\[[^\\]]+\\]\\([^)]+\\)"),
+            Regex("^[*-]\\s+\\[[ x]\\]", RegexOption.MULTILINE)
+        )
+        if (mdIndicators.any { it.containsMatchIn(trimmed) }) {
             return ClipType.MARKDOWN
         }
 
         return ClipType.TEXT
     }
-
-    fun extractTitle(text: String): String {
-        val firstLine = text.trim().lines().firstOrNull { it.isNotBlank() } ?: "Clipping"
-        val clean = firstLine.replace(Regex("^#{1,6}\\s+"), "")
-            .replace(Regex("^\\-\\s+"), "")
-            .replace(Regex("^\\d+\\.\\s+"), "")
-            .replace(Regex("^>\\s+"), "")
-            .replace(Regex("\\*\\*"), "")
-            .replace(Regex("^\\|\\s*"), "")
-            .trim()
-        return if (clean.length > 80) clean.take(77).trimEnd() + "..." else clean
-    }
-
-    /**
-     * High-speed, streaming single-pass word counter that allocates zero intermediate lists.
-     * Operates in O(N) time and O(1) memory, safe for multi-megabyte texts on Helio G99.
-     */
-    fun countWords(text: CharSequence): Int {
-        var count = 0
-        var inWord = false
-        for (i in 0 until text.length) {
-            val c = text[i]
-            if (c.isWhitespace()) {
-                inWord = false
-            } else if (!inWord) {
-                inWord = true
-                count++
-            }
-        }
-        return count
-    }
 }
-

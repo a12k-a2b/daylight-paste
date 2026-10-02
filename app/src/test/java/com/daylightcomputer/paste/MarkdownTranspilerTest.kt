@@ -194,4 +194,33 @@ class MarkdownTranspilerTest {
         val cleaned = MarkdownTranspiler.stripInlineCitations(textWithSpace)
         assertEquals("The breakthrough was confirmed. Following that, another test succeeded.", cleaned)
     }
+
+    @Test
+    fun testNestedListsIndentation() {
+        val html = "<ul><li>Parent item<ul><li>Child item 1</li><li>Child item 2</li></ul></li></ul>"
+        val md = MarkdownTranspiler.transpileHtmlToMarkdown(html)
+        assertTrue(md.contains("- Parent item"))
+        assertTrue(md.contains("  - Child item 1"))
+        assertTrue(md.contains("  - Child item 2"))
+    }
+
+    @Test
+    fun testKaTeXAnnotationPreserved() {
+        val html = "<p>Formula: <span class=\"katex\"><span class=\"katex-mathml\"><math><semantics><annotation encoding=\"application/x-tex\">E = mc^2</annotation></semantics></math></span></span> is famous.</p>"
+        val md = MarkdownTranspiler.transpileHtmlToMarkdown(html)
+        assertTrue(md.contains("\$\$E = mc^2\$\$"))
+    }
+
+    @Test
+    fun testMalformedAndDeeplyNestedHtmlFuzz() {
+        // Deeply nested 100 levels div bomb
+        val deepHtml = (1..100).fold("<p>Payload inside deep tree</p>") { acc, _ -> "<div>$acc</div>" }
+        val md = MarkdownTranspiler.transpileHtmlToMarkdown(deepHtml)
+        assertTrue(md.contains("Payload inside deep tree"))
+
+        // Malformed unclosed tags
+        val malformedHtml = "<p>Unclosed <b>bold and <i>italic and <code>code without close"
+        val mdMalformed = MarkdownTranspiler.transpileHtmlToMarkdown(malformedHtml)
+        assertTrue(mdMalformed.contains("**bold and"))
+    }
 }

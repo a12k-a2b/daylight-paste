@@ -107,10 +107,10 @@ class ClipImportReceiver : BroadcastReceiver() {
                             else -> MarkdownTranspiler.stripInlineCitations(rawText)
                         }
 
-                        val clipType = MarkdownTranspiler.detectClipType(markdownContent, rawHtml)
+                        val clipType = MarkdownTranspiler.detectClipType(markdownContent, rawHtml ?: "")
                         val title = MarkdownTranspiler.extractTitle(markdownContent.ifBlank { rawText })
                         val charCount = markdownContent.length
-                        val wordCount = markdownContent.split(Regex("\\s+")).filter { it.isNotBlank() }.size
+                        val wordCount = MarkdownTranspiler.countWords(markdownContent)
 
                         val clip = DaylightClip(
                             textContent = rawText.ifBlank { markdownContent },

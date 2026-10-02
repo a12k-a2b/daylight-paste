@@ -21,7 +21,10 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.daylightcomputer.paste.ui.components.CaptureHealthDialog
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -154,6 +157,32 @@ fun PasteScreen() {
                             color = DaylightColors.TextMuted,
                             letterSpacing = 1.6.sp
                         )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable { showHealthDialog = true }
+                                .padding(vertical = 2.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (accessState.isPrivileged) DaylightColors.ForestGreen else DaylightColors.Amber
+                                    )
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (accessState.isPrivileged) "SOLOS BACKGROUND CAPTURE ACTIVE" else "FOREGROUND CAPTURE (TAP FOR HEALTH INFO)",
+                                fontFamily = DaylightFontFamilies.RomExtendedLight,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = DaylightColors.InkSubtle,
+                                letterSpacing = 1.1.sp
+                            )
+                        }
                     }
 
                     IconButton(

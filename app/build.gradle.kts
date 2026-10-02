@@ -70,6 +70,9 @@ dependencies {
   // Tooling
   debugImplementation(libs.androidx.compose.ui.tooling)
 
+  // HTML parsing
+  implementation("org.jsoup:jsoup:1.17.2")
+
   // Testing
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)

@@ -35,8 +35,17 @@ class ClipboardWatcherService : Service() {
     private lateinit var database: ClipDatabase
     private var clipboardHud: DaylightClipboardHud? = null
 
+    private data class ClipCaptureTask(
+        val clip: ClipData,
+        val sourcePackage: String,
+        val timestamp: Long
+    )
+
+    private val captureChannel = kotlinx.coroutines.channels.Channel<ClipCaptureTask>(capacity = 64)
+    private var lastCapturedHash: String? = null
+
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
-        onClipboardChanged()
+        enqueueClipboardSnapshot()
     }
 
     override fun onCreate() {
@@ -48,107 +57,131 @@ class ClipboardWatcherService : Service() {
 
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, createNotification())
+
+        // Start serialized capture actor coroutine
+        scope.launch(Dispatchers.IO) {
+            for (task in captureChannel) {
+                processCaptureTask(task)
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Initial clip capture on startup
-        onClipboardChanged()
+        enqueueClipboardSnapshot()
         return START_STICKY
     }
 
     override fun onDestroy() {
         clipboardManager?.removePrimaryClipChangedListener(clipListener)
         clipboardHud?.dismiss()
+        captureChannel.close()
         job.cancel()
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun onClipboardChanged() {
-        scope.launch {
-            try {
-                val clip = clipboardManager?.primaryClip ?: return@launch
-                if (clip.itemCount == 0) return@launch
+    private fun enqueueClipboardSnapshot() {
+        val clip = clipboardManager?.primaryClip ?: return
+        if (clip.itemCount == 0) return
 
-                // Detect if any clip item contains an image
-                var handledAsImage = false
-                for (i in 0 until clip.itemCount) {
-                    val candidate = clip.getItemAt(i) ?: continue
-                    if (isImageClip(clip.description, candidate)) {
-                        if (handleImageClip(candidate, clip.description)) {
-                            handledAsImage = true
-                            break
-                        }
-                    }
-                }
-                if (handledAsImage) return@launch
-
-                val item = clip.getItemAt(0) ?: return@launch
-
-                val rawText = item.text?.toString() ?: item.coerceToText(this@ClipboardWatcherService)?.toString() ?: ""
-                val htmlText = item.htmlText
-
-                if (rawText.isBlank() && htmlText.isNullOrBlank()) return@launch
-
-                val content = if (rawText.isNotBlank()) rawText else htmlText ?: ""
-                
-                // Transpile HTML to Markdown if HTML is present, otherwise clean citations
-                val markdownContent = when {
-                    !htmlText.isNullOrBlank() -> MarkdownTranspiler.transpileHtmlToMarkdown(htmlText)
-                    MarkdownTranspiler.detectClipType(content) == ClipType.MARKDOWN -> content
-                    MarkdownTranspiler.looksLikeHtml(content) -> MarkdownTranspiler.transpileHtmlToMarkdown(content)
-                    else -> MarkdownTranspiler.stripInlineCitations(content)
-                }
-
-                val clipType = MarkdownTranspiler.detectClipType(markdownContent, htmlText)
-                val title = MarkdownTranspiler.extractTitle(markdownContent.ifBlank { content })
-                val charCount = markdownContent.length
-                val wordCount = MarkdownTranspiler.countWords(markdownContent)
-                
-                var sourcePackage = "System"
-                try {
-                    val method = clipboardManager?.javaClass?.getMethod("getPrimaryClipSource")
-                    val src = method?.invoke(clipboardManager) as? String
-                    if (!src.isNullOrBlank()) {
-                        sourcePackage = src
-                    }
-                } catch (ignored: Exception) {}
-
-                val daylightClip = DaylightClip(
-                    textContent = content,
-                    markdownContent = markdownContent,
-                    htmlContent = htmlText,
-                    title = title,
-                    clipType = clipType,
-                    charCount = charCount,
-                    wordCount = wordCount,
-                    sourcePackage = sourcePackage,
-                    isPinned = false,
-                    pinboard = "ALL",
-                    createdAt = System.currentTimeMillis()
-                )
-
-                database.insertClip(daylightClip)
-
-                // Background vectorization for semantic AI search
-                scope.launch {
-                    try {
-                        com.daylightcomputer.paste.ai.SemanticSearchManager.getInstance(this@ClipboardWatcherService).vectorizeMissingClips()
-                    } catch (ignored: Exception) {}
-                }
-
-                // Show SolOS LivePaper HUD if copied from an external app
-                val isInternal = (sourcePackage == packageName) ||
-                        DaylightPasteManager.isRecentInternalCopy(content) ||
-                        DaylightPasteManager.isRecentInternalCopy(markdownContent)
-                if (!isInternal) {
-                    clipboardHud?.show(daylightClip)
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
+        var sourcePackage = "System"
+        try {
+            val method = clipboardManager?.javaClass?.getMethod("getPrimaryClipSource")
+            val src = method?.invoke(clipboardManager) as? String
+            if (!src.isNullOrBlank()) {
+                sourcePackage = src
             }
+        } catch (ignored: Exception) {}
+
+        captureChannel.trySend(ClipCaptureTask(clip, sourcePackage, System.currentTimeMillis()))
+    }
+
+    private suspend fun processCaptureTask(task: ClipCaptureTask) {
+        try {
+            val clip = task.clip
+            val sourcePackage = task.sourcePackage
+            if (clip.itemCount == 0) return
+
+            // Detect if any clip item contains an image
+            var handledAsImage = false
+            for (i in 0 until clip.itemCount) {
+                val candidate = clip.getItemAt(i) ?: continue
+                if (isImageClip(clip.description, candidate)) {
+                    if (handleImageClip(candidate, clip.description, sourcePackage)) {
+                        handledAsImage = true
+                        break
+                    }
+                }
+            }
+            if (handledAsImage) return
+
+            val item = clip.getItemAt(0) ?: return
+            val rawText = item.text?.toString() ?: item.coerceToText(this@ClipboardWatcherService)?.toString() ?: ""
+            val htmlText = item.htmlText
+
+            if (rawText.isBlank() && htmlText.isNullOrBlank()) return
+
+            val content = if (rawText.isNotBlank()) rawText else htmlText ?: ""
+            val contentHash = computeSha256(content)
+            if (contentHash == lastCapturedHash) return
+            lastCapturedHash = contentHash
+
+            // Prevent self-capture loops from our own internal copies
+            if (DaylightPasteManager.isRecentInternalCopy(content)) return
+            
+            // Transpile HTML to Markdown if HTML is present, otherwise clean citations
+            val markdownContent = when {
+                !htmlText.isNullOrBlank() -> MarkdownTranspiler.transpileHtmlToMarkdown(htmlText)
+                MarkdownTranspiler.detectClipType(content) == ClipType.MARKDOWN -> content
+                MarkdownTranspiler.looksLikeHtml(content) -> MarkdownTranspiler.transpileHtmlToMarkdown(content)
+                else -> MarkdownTranspiler.stripInlineCitations(content)
+            }
+
+            val clipType = MarkdownTranspiler.detectClipType(markdownContent, htmlText ?: "")
+            val title = MarkdownTranspiler.extractTitle(markdownContent.ifBlank { content })
+            val charCount = markdownContent.length
+            val wordCount = MarkdownTranspiler.countWords(markdownContent)
+
+            val daylightClip = DaylightClip(
+                textContent = content,
+                markdownContent = markdownContent,
+                htmlContent = htmlText,
+                title = title,
+                clipType = clipType,
+                charCount = charCount,
+                wordCount = wordCount,
+                sourcePackage = sourcePackage,
+                isPinned = false,
+                pinboard = "ALL",
+                createdAt = System.currentTimeMillis()
+            )
+
+            database.insertClip(daylightClip)
+
+            // Background vectorization for semantic AI search
+            scope.launch {
+                try {
+                    com.daylightcomputer.paste.ai.SemanticSearchManager.getInstance(this@ClipboardWatcherService).vectorizeMissingClips()
+                } catch (ignored: Exception) {}
+            }
+
+            // Show SolOS LivePaper HUD if copied from an external app
+            val isInternal = (sourcePackage == packageName) ||
+                    DaylightPasteManager.isRecentInternalCopy(content) ||
+                    DaylightPasteManager.isRecentInternalCopy(markdownContent)
+            if (!isInternal) {
+                clipboardHud?.show(daylightClip)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
+    }
+
+    private fun computeSha256(input: String): String {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        val digest = md.digest(input.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
     }
 
     private fun isImageClip(desc: ClipDescription?, item: ClipData.Item): Boolean {
@@ -170,7 +203,7 @@ class ClipboardWatcherService : Service() {
         return path.endsWith(".png") || path.endsWith(".jpg") || path.endsWith(".jpeg") || path.endsWith(".webp") || path.endsWith(".gif")
     }
 
-    private fun handleImageClip(item: ClipData.Item, desc: ClipDescription?): Boolean {
+    private fun handleImageClip(item: ClipData.Item, desc: ClipDescription?, sourcePackage: String): Boolean {
         val uri = item.uri ?: item.intent?.data ?: return false
         val uriStr = uri.toString()
 
@@ -235,15 +268,6 @@ class ClipboardWatcherService : Service() {
                 width > 0 && height > 0 -> "Image (${width}×${height})"
                 else -> "Captured Image"
             }
-
-            var sourcePackage = "System"
-            try {
-                val method = clipboardManager?.javaClass?.getMethod("getPrimaryClipSource")
-                val src = method?.invoke(clipboardManager) as? String
-                if (!src.isNullOrBlank()) {
-                    sourcePackage = src
-                }
-            } catch (ignored: Exception) {}
 
             val localUri = "file://${destFile.absolutePath}"
             val daylightClip = DaylightClip(
