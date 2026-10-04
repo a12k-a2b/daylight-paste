@@ -17,6 +17,7 @@ import androidx.core.app.NotificationCompat
 import com.daylightcomputer.paste.R
 import com.daylightcomputer.paste.data.ClipDatabase
 import com.daylightcomputer.paste.data.DaylightClip
+import com.daylightcomputer.paste.data.DaylightPasteContentProvider
 import com.daylightcomputer.paste.markdown.ClipType
 import com.daylightcomputer.paste.markdown.MarkdownTranspiler
 import java.io.File
@@ -102,6 +103,12 @@ class ClipboardWatcherService : Service() {
             val clip = task.clip
             val sourcePackage = task.sourcePackage
             if (clip.itemCount == 0) return
+
+            // Self-capture guard: clips we published via our own streaming provider
+            // are already in history. Reading them back would re-stream megabytes.
+            for (i in 0 until clip.itemCount) {
+                if (clip.getItemAt(i)?.uri?.authority == DaylightPasteContentProvider.AUTHORITY) return
+            }
 
             // Detect if any clip item contains an image
             var handledAsImage = false

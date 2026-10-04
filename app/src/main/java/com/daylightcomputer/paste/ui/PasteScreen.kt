@@ -60,9 +60,14 @@ import com.daylightcomputer.paste.ui.components.SearchBar
 import com.daylightcomputer.paste.ui.theme.DaylightColors
 import com.daylightcomputer.paste.ui.theme.DaylightFontFamilies
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 
 @Composable
 fun PasteScreen() {
@@ -80,7 +85,10 @@ fun PasteScreen() {
     var activeReaderClip by remember { mutableStateOf<DaylightClip?>(null) }
     var confirmationMessage by remember { mutableStateOf<String?>(null) }
     var showHealthDialog by remember { mutableStateOf(false) }
-    val accessState = remember { DaylightPasteManager.checkClipboardAccessState(context) }
+    var showClearConfirm by remember { mutableStateOf(false) }
+    var accessState by remember { mutableStateOf(DaylightPasteManager.checkClipboardAccessState(context)) }
+    var refreshJob by remember { mutableStateOf<Job?>(null) }
+    var resumeTick by remember { mutableStateOf(0) }
 
     // Handle Android system back gesture / button
     androidx.activity.compose.BackHandler(enabled = activeReaderClip != null) {
@@ -91,9 +99,11 @@ fun PasteScreen() {
         searchQuery = ""
     }
 
-    // Refresh clips helper
-    fun refreshClips() {
-        scope.launch(Dispatchers.IO) {
+    // Refresh clips helper. Cancels any in-flight search so stale results never win the race.
+    fun refreshClips(debounceMs: Long = 0L) {
+        refreshJob?.cancel()
+        refreshJob = scope.launch(Dispatchers.IO) {
+            if (debounceMs > 0) delay(debounceMs)
             val result = searchManager.search(
                 query = searchQuery,
                 filterType = selectedFilter,
@@ -107,8 +117,15 @@ fun PasteScreen() {
         }
     }
 
-    LaunchedEffect(selectedFilter, searchQuery, isAiMode) {
-        refreshClips()
+    // Re-check capture health + reload history whenever the user returns to the app
+    // (e.g. after enabling the Daylight keyboard in Settings, or after copying elsewhere).
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        accessState = DaylightPasteManager.checkClipboardAccessState(context)
+        resumeTick++
+    }
+
+    LaunchedEffect(selectedFilter, searchQuery, isAiMode, resumeTick) {
+        refreshClips(debounceMs = if (searchQuery.isNotEmpty()) 250L else 0L)
     }
 
     // Auto-dismiss confirmation toast
@@ -177,7 +194,7 @@ fun PasteScreen() {
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = if (accessState.isPrivileged) "SOLOS BACKGROUND CAPTURE ACTIVE" else "FOREGROUND CAPTURE (TAP FOR HEALTH INFO)",
+                                text = if (accessState.isPrivileged) "BACKGROUND CAPTURE ON · DAYLIGHT KEYBOARD" else "BACKGROUND CAPTURE OFF · TAP TO FIX",
                                 fontFamily = DaylightFontFamilies.RomExtendedLight,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Medium,
@@ -188,15 +205,7 @@ fun PasteScreen() {
                     }
 
                     IconButton(
-                        onClick = {
-                            scope.launch(Dispatchers.IO) {
-                                db.clearHistory(keepPinned = true)
-                                refreshClips()
-                                withContext(Dispatchers.Main) {
-                                    confirmationMessage = "Cleared unpinned history"
-                                }
-                            }
-                        }
+                        onClick = { showClearConfirm = true }
                     ) {
                         Icon(
                             imageVector = Icons.Default.DeleteSweep,
@@ -408,6 +417,43 @@ fun PasteScreen() {
                 CaptureHealthDialog(
                     accessState = accessState,
                     onDismiss = { showHealthDialog = false }
+                )
+            }
+
+            if (showClearConfirm) {
+                AlertDialog(
+                    onDismissRequest = { showClearConfirm = false },
+                    containerColor = DaylightColors.PaperBg,
+                    title = {
+                        Text(
+                            "Clear history?",
+                            fontFamily = DaylightFontFamilies.ArizonaMix,
+                            color = DaylightColors.InkBlack
+                        )
+                    },
+                    text = {
+                        Text(
+                            "This deletes every clip that isn't pinned. It can't be undone.",
+                            color = DaylightColors.InkBlack
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            showClearConfirm = false
+                            scope.launch(Dispatchers.IO) {
+                                db.clearHistory(keepPinned = true)
+                                withContext(Dispatchers.Main) {
+                                    refreshClips()
+                                    confirmationMessage = "Cleared unpinned history"
+                                }
+                            }
+                        }) { Text("Delete", color = DaylightColors.InkBlack, fontWeight = FontWeight.Bold) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showClearConfirm = false }) {
+                            Text("Keep", color = DaylightColors.InkBlack)
+                        }
+                    }
                 )
             }
         }

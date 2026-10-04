@@ -76,8 +76,30 @@ class SemanticSearchManager private constructor(context: Context) {
             )
         }
 
-        // Semantic ranking
-        val ranked = activeProvider.rankClips(cleanQuery, candidates, topK = 50)
+        // Semantic ranking (candidates are lightweight 300-char projections)
+        val semantic = activeProvider.rankClips(cleanQuery, candidates, topK = 50)
+
+        // Full-text FTS hits cover the WHOLE clip body, not just the preview.
+        // Exact matches always rank first; semantic neighbours follow.
+        val ftsHits = db.getClips(filterType = filterType, searchQuery = cleanQuery, limit = 100)
+        val ftsIds = ftsHits.map { it.id }.toHashSet()
+        val semanticById = semantic.associateBy { it.clip.id }
+        val merged = ArrayList<ScoredClip>(ftsHits.size + semantic.size)
+        for (hit in ftsHits) {
+            val s = semanticById[hit.id]
+            merged.add(
+                ScoredClip(
+                    clip = hit,
+                    score = 1.0f,
+                    lexicalScore = 1.0f,
+                    vectorScore = s?.vectorScore ?: 0f,
+                    matchSnippet = s?.matchSnippet,
+                    explanation = "Exact text match"
+                )
+            )
+        }
+        semantic.filterTo(merged) { it.clip.id !in ftsIds }
+        val ranked: List<ScoredClip> = merged
 
         // If the query looks like a question ("what is", "where is", "how do", "wifi password?"),
         // and Fast AI is available, attempt answering

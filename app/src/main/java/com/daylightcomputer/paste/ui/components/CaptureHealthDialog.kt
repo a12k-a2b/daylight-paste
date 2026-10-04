@@ -31,12 +31,17 @@ import androidx.compose.ui.window.DialogProperties
 import com.daylightcomputer.paste.service.DaylightPasteManager
 import com.daylightcomputer.paste.ui.theme.DaylightColors
 import com.daylightcomputer.paste.ui.theme.DaylightFontFamilies
+import android.content.Intent
+import android.provider.Settings
+import android.view.inputmethod.InputMethodManager
+import androidx.compose.ui.platform.LocalContext
 
 @Composable
 fun CaptureHealthDialog(
     accessState: DaylightPasteManager.ClipboardAccessState,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -109,7 +114,7 @@ fun CaptureHealthDialog(
 
                 // Architectural explanation
                 Text(
-                    text = "AOSP Android 13 Background Clipboard Enforcement",
+                    text = "Why a keyboard?",
                     fontFamily = DaylightFontFamilies.ArizonaMix,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
@@ -117,7 +122,7 @@ fun CaptureHealthDialog(
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "In Android 10+ (including SolOS / Android 13), ClipboardService denies background clipboard reads to third-party apps unless the calling package has the role/signature-gated READ_CLIPBOARD_IN_BACKGROUND permission or is the currently focused input method (IME).",
+                    text = "Android 13 only lets two kinds of app read the clipboard while you're in a different app: system apps with a signature-gated permission, and the keyboard you currently have selected. To save every copy automatically, Daylight Paste must be your selected keyboard. If you switch to another keyboard, copies made in other apps are not saved until you switch back.",
                     fontFamily = DaylightFontFamilies.ArizonaSans,
                     fontSize = 13.sp,
                     color = DaylightColors.InkSubtle,
@@ -126,8 +131,47 @@ fun CaptureHealthDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
+                if (!accessState.isPrivileged) {
+                    Text(
+                        text = "Turn it on (two steps):",
+                        fontFamily = DaylightFontFamilies.ArizonaMix,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = DaylightColors.InkBlack
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            context.startActivity(
+                                Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = DaylightColors.InkBlack),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("1 · ENABLE DAYLIGHT PASTE KEYBOARD", color = DaylightColors.PaperBg,
+                            fontFamily = DaylightFontFamilies.RomExtendedLight, fontSize = 12.sp, letterSpacing = 1.2.sp)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            val imm = context.getSystemService(InputMethodManager::class.java)
+                            imm?.showInputMethodPicker()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = DaylightColors.Amber),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("2 · PICK IT AS YOUR KEYBOARD", color = DaylightColors.InkBlack,
+                            fontFamily = DaylightFontFamilies.RomExtendedLight, fontSize = 12.sp, letterSpacing = 1.2.sp)
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
                 Text(
-                    text = "Available Operating Modes:",
+                    text = "Other ways to use it:",
                     fontFamily = DaylightFontFamilies.ArizonaMix,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
@@ -136,20 +180,20 @@ fun CaptureHealthDialog(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 ModeItem(
-                    title = "1. Tooltip Menu (Daylight Copy / Paste)",
-                    desc = "Select any text in any app, tap 'Daylight Copy' or 'Daylight Paste' in the OS selection menu. Works universally across SolOS with zero special privileges."
+                    title = "Selection menu: Daylight Copy / Daylight Paste",
+                    desc = "Select text in any app, open the ⋮ overflow in the selection menu, tap 'Daylight Copy' to save it or 'Daylight Paste' to insert a saved clip. Works with any keyboard. Some apps (e.g. many Compose apps) don't show these entries."
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
                 ModeItem(
-                    title = "2. Daylight Paste IME (Unlimited Chunking)",
-                    desc = "Switch to Daylight Paste keyboard to stream unlimited-length clips directly into generic editors without Binder IPC caps. As an active IME, background clipboard read is granted by AOSP."
+                    title = "Keyboard clip strip (unlimited length)",
+                    desc = "Tap a card in the strip above the Daylight keyboard. Text is typed into the field in 8 KB pieces, so even multi-megabyte clips go in without hitting Android's ~1 MB Binder limit."
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
                 ModeItem(
-                    title = "3. Privileged SolOS System Deployment",
-                    desc = "Deployed as an integrated SolOS system subsystem in /system/priv-app/ with privapp-permissions whitelist XML, granting genuine seamless OS-wide background capture."
+                    title = "Open the app",
+                    desc = "Whatever is on the clipboard when you open Daylight Paste is saved, no keyboard needed."
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))

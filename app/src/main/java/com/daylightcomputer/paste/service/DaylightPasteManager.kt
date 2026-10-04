@@ -79,7 +79,7 @@ object DaylightPasteManager {
      */
     fun copyAsMarkdown(context: Context, clip: DaylightClip): Boolean {
         return try {
-            val fullClip = if (clip.id > 0 && (clip.markdownContent.isEmpty() || clip.textContent.length <= 300)) {
+            val fullClip = if (clip.id > 0) {
                 ClipDatabase.getInstance(context).getClipById(clip.id) ?: clip
             } else {
                 clip
@@ -125,7 +125,7 @@ object DaylightPasteManager {
      */
     fun copyAsPlainText(context: Context, clip: DaylightClip): Boolean {
         return try {
-            val fullClip = if (clip.id > 0 && (clip.textContent.isEmpty() || clip.textContent.length <= 300)) {
+            val fullClip = if (clip.id > 0) {
                 ClipDatabase.getInstance(context).getClipById(clip.id) ?: clip
             } else {
                 clip
@@ -144,12 +144,6 @@ object DaylightPasteManager {
                 ClipData.newPlainText(fullClip.title, raw)
             } else {
                 val streamUri = DaylightPasteContentProvider.getClipUri(fullClip.id, asMarkdown = false)
-                val preview = if (raw.length > 500) {
-                    raw.take(500) + "\n\n... [Streamed via Daylight Paste: ${fullClip.wordCount} words, ${fullClip.charCount} chars]"
-                } else {
-                    raw
-                }
-
                 val grantIntent = Intent().apply {
                     data = streamUri
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)

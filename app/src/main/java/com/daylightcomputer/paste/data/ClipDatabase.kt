@@ -360,21 +360,21 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
 
     fun getClipById(id: Long): DaylightClip? {
         val db = readableDatabase
-        val cursor = db.query(
+        val meta = db.query(
             TABLE_CLIPS,
-            null,
+            lightProjection(previewChars = 0),
             "$COL_ID = ?",
             arrayOf(id.toString()),
             null,
             null,
             null
+        ).use { if (it.moveToFirst()) parseCursor(it) else null } ?: return null
+
+        return meta.copy(
+            textContent = readColumnChunked(db, id, COL_TEXT_CONTENT),
+            markdownContent = readColumnChunked(db, id, COL_MARKDOWN_CONTENT),
+            htmlContent = readColumnChunked(db, id, COL_HTML_CONTENT).ifEmpty { null }
         )
-        cursor.use {
-            if (it.moveToFirst()) {
-                return parseCursor(it)
-            }
-        }
-        return null
     }
 
     fun updateClipEmbedding(clipId: Long, embedding: ByteArray): Boolean {
@@ -390,7 +390,7 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
         val db = readableDatabase
         val cursor = db.query(
             TABLE_CLIPS,
-            null,
+            lightProjection(previewChars = 4000),
             "$COL_EMBEDDING IS NULL",
             null,
             null,
