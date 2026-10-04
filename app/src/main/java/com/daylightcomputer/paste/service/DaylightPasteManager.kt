@@ -41,32 +41,32 @@ object DaylightPasteManager {
      * unless focused, default IME, or platform-privileged with READ_CLIPBOARD_IN_BACKGROUND.
      */
     fun checkClipboardAccessState(context: Context): ClipboardAccessState {
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-            ?: return ClipboardAccessState.UNAVAILABLE
-
+        // NOTE: probing clipboard.primaryClip from our own Activity is meaningless — the focused
+        // app is always allowed to read. The real question is whether reads will succeed while
+        // ANOTHER app is focused. On Android 13 that requires us to be the default IME.
         return try {
-            val clip = clipboard.primaryClip
-            if (clip != null) {
-                ClipboardAccessState.GRANTED
-            } else if (clipboard.hasPrimaryClip()) {
-                // Clipboard has content, but returning null indicates background focus restriction
-                ClipboardAccessState.RESTRICTED_BACKGROUND
+            if (isDefaultInputMethod(context)) {
+                ClipboardAccessState.BACKGROUND_VIA_IME
             } else {
-                ClipboardAccessState.EMPTY_OR_PERMITTED
+                ClipboardAccessState.FOREGROUND_ONLY
             }
-        } catch (e: SecurityException) {
-            ClipboardAccessState.DENIED
         } catch (e: Exception) {
             ClipboardAccessState.UNAVAILABLE
         }
     }
 
+    fun isDefaultInputMethod(context: Context): Boolean {
+        val current = android.provider.Settings.Secure.getString(
+            context.contentResolver,
+            android.provider.Settings.Secure.DEFAULT_INPUT_METHOD
+        ) ?: return false
+        return current.startsWith("${context.packageName}/")
+    }
+
     enum class ClipboardAccessState(val label: String, val isPrivileged: Boolean) {
-        GRANTED("Active (Accessible)", true),
-        EMPTY_OR_PERMITTED("Active (Idle)", true),
-        RESTRICTED_BACKGROUND("Restricted (Needs SolOS Privileged Role or Focused App)", false),
-        DENIED("Denied by Security Policy", false),
-        UNAVAILABLE("Service Unavailable", false)
+        BACKGROUND_VIA_IME("Background capture ON (Daylight Paste keyboard is active)", true),
+        FOREGROUND_ONLY("Background capture OFF — switch keyboard to Daylight Paste", false),
+        UNAVAILABLE("Clipboard service unavailable", false)
     }
 
     /**

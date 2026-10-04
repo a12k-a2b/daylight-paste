@@ -65,20 +65,39 @@ class DaylightSearchBubbleActivity : ComponentActivity() {
         }
     }
 
+    private var webViewRef: WebView? = null
+
+    override fun onDestroy() {
+        // Explicitly tear down the WebView so its renderer process and timers stop immediately.
+        webViewRef?.apply {
+            stopLoading()
+            loadUrl("about:blank")
+            (parent as? ViewGroup)?.removeView(this)
+            destroy()
+        }
+        webViewRef = null
+        super.onDestroy()
+    }
+
     private fun initContent() {
+        // Single translucent window: no Dialog, no dim layer, no window animation.
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.setDimAmount(0f)
+        window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+        window.setWindowAnimations(0)
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+
         setContent {
             val currentQuery by queryState
             val searchUrl = remember(currentQuery) {
                 "https://lite.duckduckgo.com/lite/?q=${URLEncoder.encode(currentQuery, "UTF-8")}"
             }
-            Dialog(
-                onDismissRequest = { finish() },
-                properties = DialogProperties(
-                    usePlatformDefaultWidth = false,
-                    dismissOnBackPress = true,
-                    dismissOnClickOutside = true
-                )
-            ) {
+            androidx.activity.compose.BackHandler {
+                val wv = webViewRef
+                if (wv != null && wv.canGoBack()) wv.goBack() else finish()
+            }
+            run {
                 // Transparent click-outside backdrop (zero alpha scrim for pure LivePaper sunlight contrast)
                 Box(
                     modifier = Modifier
@@ -189,11 +208,15 @@ class DaylightSearchBubbleActivity : ComponentActivity() {
                                                 )
                                             }
                                         }
+                                        tag = searchUrl
+                                        webViewRef = this
                                         loadUrl(searchUrl)
                                     }
                                 },
                                 update = { webView ->
-                                    if (webView.url != searchUrl) {
+                                    // Reload only for a new query; leave in-bubble pagination alone.
+                                    if (webView.tag != searchUrl) {
+                                        webView.tag = searchUrl
                                         webView.loadUrl(searchUrl)
                                     }
                                 }
