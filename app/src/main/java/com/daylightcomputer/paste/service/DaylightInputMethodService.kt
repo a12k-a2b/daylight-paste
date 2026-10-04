@@ -5,14 +5,19 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.inputmethodservice.InputMethodService
+import android.inputmethodservice.Keyboard
+import android.inputmethodservice.KeyboardView
 import android.os.Build
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
+import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.widget.Button
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.daylightcomputer.paste.R
 import com.daylightcomputer.paste.data.ClipDatabase
 import com.daylightcomputer.paste.data.DaylightClip
 import com.daylightcomputer.paste.markdown.MarkdownTranspiler
@@ -80,9 +85,11 @@ class DaylightInputMethodService : InputMethodService() {
             }
             addView(title)
 
-            // Switch back to normal keyboard button
+            // Switch to another keyboard. NOTE: while another IME is the default,
+            // Android 13 blocks background clipboard capture for Daylight Paste.
             val switchBtn = Button(context).apply {
-                text = "⌨ Switch Keyboard"
+                text = "🌐 Other keyboard"
+                contentDescription = "Switch to another keyboard (pauses background capture)"
                 textSize = 11f
                 setTextColor(Color.parseColor("#FAF8F5"))
                 background = GradientDrawable().apply {
@@ -113,9 +120,79 @@ class DaylightInputMethodService : InputMethodService() {
         scrollView.addView(clipsContainer)
         root.addView(scrollView)
 
+        // Minimal QWERTY so this IME can stay the default keyboard all day.
+        @Suppress("DEPRECATION")
+        run {
+            val kv = layoutInflater.inflate(R.layout.ime_keyboard, root, false) as KeyboardView
+            qwertyKeyboard = Keyboard(this, R.xml.kbd_qwerty)
+            symbolsKeyboard = Keyboard(this, R.xml.kbd_symbols)
+            kv.keyboard = qwertyKeyboard
+            kv.isPreviewEnabled = false
+            kv.setOnKeyboardActionListener(keyListener)
+            keyboardView = kv
+            root.addView(kv)
+        }
+
         loadRecentClips()
 
         return root
+    }
+
+    @Suppress("DEPRECATION")
+    private var keyboardView: KeyboardView? = null
+    @Suppress("DEPRECATION")
+    private var qwertyKeyboard: Keyboard? = null
+    @Suppress("DEPRECATION")
+    private var symbolsKeyboard: Keyboard? = null
+
+    @Suppress("DEPRECATION")
+    private val keyListener = object : KeyboardView.OnKeyboardActionListener {
+        override fun onKey(primaryCode: Int, keyCodes: IntArray?) {
+            val ic = currentInputConnection ?: return
+            val kv = keyboardView ?: return
+            when (primaryCode) {
+                Keyboard.KEYCODE_SHIFT -> {
+                    kv.isShifted = !kv.isShifted
+                }
+                Keyboard.KEYCODE_MODE_CHANGE -> {
+                    kv.keyboard = if (kv.keyboard === qwertyKeyboard) symbolsKeyboard else qwertyKeyboard
+                    kv.isShifted = false
+                }
+                Keyboard.KEYCODE_DELETE -> {
+                    val selected = ic.getSelectedText(0)
+                    if (!selected.isNullOrEmpty()) ic.commitText("", 1)
+                    else sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL)
+                }
+                10 -> {
+                    val action = currentInputEditorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION)
+                    val multiLine = ((currentInputEditorInfo?.inputType ?: 0) and
+                        android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE) != 0
+                    if (!multiLine && action != null && action != EditorInfo.IME_ACTION_NONE &&
+                        action != EditorInfo.IME_ACTION_UNSPECIFIED && sendDefaultEditorAction(true)) {
+                        // handled as editor action (search/go/send)
+                    } else {
+                        ic.commitText("\n", 1)
+                    }
+                }
+                else -> {
+                    if (primaryCode > 0) {
+                        var s = String(Character.toChars(primaryCode))
+                        if (kv.isShifted) {
+                            s = s.uppercase()
+                            kv.isShifted = false
+                        }
+                        ic.commitText(s, 1)
+                    }
+                }
+            }
+        }
+        override fun onPress(primaryCode: Int) {}
+        override fun onRelease(primaryCode: Int) {}
+        override fun onText(text: CharSequence?) { if (text != null) currentInputConnection?.commitText(text, 1) }
+        override fun swipeLeft() {}
+        override fun swipeRight() {}
+        override fun swipeDown() {}
+        override fun swipeUp() {}
     }
 
     override fun onStartInputView(info: android.view.inputmethod.EditorInfo?, restarting: Boolean) {

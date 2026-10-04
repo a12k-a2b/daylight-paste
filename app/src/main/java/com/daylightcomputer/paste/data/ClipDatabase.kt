@@ -132,10 +132,13 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
 
     fun insertClip(clip: DaylightClip): Long {
         val db = writableDatabase
-        // Prevent duplicate consecutive clips
+        // Prevent duplicate consecutive clips. Only cheap columns are read through the Cursor;
+        // text equality is evaluated inside SQLite so a multi-MB "latest" row can never overflow
+        // the 2MB CursorWindow (which previously threw and blocked every later insert).
         val latest = getLatestClip()
         if (latest != null) {
-            val isSameText = clip.textContent.isNotBlank() && latest.textContent == clip.textContent && clip.clipType != ClipType.IMAGE
+            val isSameText = clip.clipType != ClipType.IMAGE && clip.textContent.isNotBlank() &&
+                latest.charCount == clip.charCount && isLatestTextEqual(db, latest.id, clip.textContent)
             val isSameImage = clip.isImage && latest.isImage && (
                 (!clip.imageUri.isNullOrBlank() && latest.imageUri == clip.imageUri) ||
                 (!clip.summary.isNullOrBlank() && latest.summary == clip.summary && latest.title == clip.title)
@@ -176,11 +179,53 @@ class ClipDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, 
         return db.insert(TABLE_CLIPS, null, values)
     }
 
+    private fun isLatestTextEqual(db: SQLiteDatabase, id: Long, text: String): Boolean {
+        db.rawQuery(
+            "SELECT 1 FROM $TABLE_CLIPS WHERE $COL_ID = ? AND $COL_TEXT_CONTENT = ?",
+            arrayOf(id.toString(), text)
+        ).use { return it.moveToFirst() }
+    }
+
+    /** Metadata-only projection: big text columns are truncated so a row always fits a CursorWindow. */
+    private fun lightProjection(previewChars: Int = 300) = arrayOf(
+        COL_ID,
+        "substr($COL_TEXT_CONTENT, 1, $previewChars) AS $COL_TEXT_CONTENT",
+        "'' AS $COL_MARKDOWN_CONTENT",
+        "'' AS $COL_HTML_CONTENT",
+        COL_IMAGE_URI,
+        COL_SUMMARY,
+        COL_EMBEDDING,
+        COL_TITLE,
+        COL_CLIP_TYPE,
+        COL_CHAR_COUNT,
+        COL_WORD_COUNT,
+        COL_SOURCE_PACKAGE,
+        COL_IS_PINNED,
+        COL_PINBOARD,
+        COL_CREATED_AT
+    )
+
+    /** Reads one TEXT column in fixed-size slices so arbitrarily large values never hit the 2MB CursorWindow. */
+    private fun readColumnChunked(db: SQLiteDatabase, id: Long, column: String): String {
+        val sliceChars = 512_000
+        val sb = StringBuilder()
+        var offset = 1
+        while (true) {
+            val slice = db.rawQuery(
+                "SELECT substr($column, ?, ?) FROM $TABLE_CLIPS WHERE $COL_ID = ?",
+                arrayOf(offset.toString(), sliceChars.toString(), id.toString())
+            ).use { c -> if (c.moveToFirst()) c.getString(0).orEmpty() else "" }
+            sb.append(slice)
+            if (slice.length < sliceChars) return sb.toString()
+            offset += sliceChars
+        }
+    }
+
     fun getLatestClip(): DaylightClip? {
         val db = readableDatabase
         val cursor = db.query(
             TABLE_CLIPS,
-            null,
+            lightProjection(),
             null,
             null,
             null,
