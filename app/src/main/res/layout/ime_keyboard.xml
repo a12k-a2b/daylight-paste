@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<android.inputmethodservice.KeyboardView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/daylight_keyboard"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="#FAF8F5"
+    android:keyBackground="@drawable/ime_key_bg"
+    android:keyTextColor="#111111"
+    android:keyTextSize="22sp"
+    android:labelTextSize="16sp"
+    android:shadowRadius="0"
+    android:shadowColor="#00000000"
+    android:paddingTop="4dp"
+    android:paddingBottom="8dp" />
